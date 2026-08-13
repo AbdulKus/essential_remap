@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Essential Remap</string>
+    <string name="service_name">Essential Remap key listener</string>
+    <string name="service_summary">Handles only the Nothing Essential Key (scan code 250)</string>
+    <string name="service_description">Required for global hardware-key filtering. The service consumes only scan code 250 and runs the configured action. It cannot retrieve screen content, type text, or collect accessibility data.</string>
+</resources>

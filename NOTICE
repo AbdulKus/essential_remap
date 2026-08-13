@@ -1,0 +1,12 @@
+Essential Remap
+Copyright (c) 2026 AbdulKus
+
+Portions of the hardware-key classifier, action execution, and local Wireless ADB setup
+are adapted from Essential Key Remapper:
+Copyright (c) 2026 wreck2053
+https://github.com/wreck2053/essential-key
+
+Both projects are distributed under the MIT License included in LICENSE.
+
+AOSP assistant invocation constants are documented by the Android Open Source Project
+and used here through public Intent extras; no AOSP source code is bundled.
