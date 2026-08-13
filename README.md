@@ -43,7 +43,7 @@ After the key is released, an `AccessibilityService` requests Android's key-even
 
 ## Lock screen and sleep
 
-Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
+Each press type has a **Run while locked** option. **Turn screen off again** can also be enabled per press type. It calls Android's lock-screen global action after the configured action only when that same press began with the display non-interactive; presses made while the display was already on are unaffected. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
 
 On the tested Nothing OS build, `nt_block_essential_key=0` lets Nothing OS wake the device long enough to dispatch a complete press reliably. WindowManager records `ACTION_DOWN` while the display is still non-interactive and can record the matching `ACTION_UP` after the display becomes interactive. Essential Remap pairs both halves by `downTime`, so the first physical press is classified instead of merely waking the display. With the ADB-granted `READ_LOGS` development permission, the app starts a dedicated monitor process and a logcat reader filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. It does not store or transmit logs, and the waiting reader holds no wake lock.
 
@@ -57,7 +57,7 @@ Android does not expose a public `CIRCLE_TO_SEARCH` action. Essential Remap requ
 
 ## Install
 
-Download the signed APK from [Releases](../../releases). The first release uses the repository's public development keystore so automated builds remain update-compatible. This is appropriate for test/personal distribution, not Play Store publishing. A production distributor should provide a private keystore through the `SIGNING_*` environment variables in `app/build.gradle.kts`.
+Download the signed APK from [Releases](../../releases). Releases built from `main` require a private keystore from GitHub Actions Secrets; the workflow never silently falls back to the public test key for a published build.
 
 On first launch:
 
@@ -77,6 +77,15 @@ Requirements: JDK 17, Android SDK 36, and Android Studio or Gradle 8.11.1.
 ```
 
 Every push to `main` builds debug and release APKs. The first successful build for the version in the workflow also publishes a GitHub Release with a SHA-256 checksum.
+
+Release signing uses these GitHub Actions Secrets:
+
+- `SIGNING_KEYSTORE_BASE64` — the entire JKS or PKCS12 file encoded as base64
+- `SIGNING_STORE_PASSWORD`
+- `SIGNING_KEY_ALIAS`
+- `SIGNING_KEY_PASSWORD`
+
+The workflow also accepts the shorter aliases `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`. Pull requests without secret access use the repository test key only for CI validation.
 
 ## Privacy
 

@@ -163,6 +163,7 @@ fun EssentialRemapApp(
         updateSystemAction = viewModel::updateSystemAction,
         updateLaunchApp = viewModel::updateLaunchApp,
         updateRunWhileLocked = viewModel::updateRunWhileLocked,
+        updateTurnScreenOffAfterWake = viewModel::updateTurnScreenOffAfterWake,
         setRemappingEnabled = viewModel::setRemappingEnabled,
         updateHaptic = viewModel::updateHaptic,
         previewHaptic = viewModel::previewHaptic,
@@ -546,6 +547,7 @@ private fun HomeScreen(
     updateSystemAction: (PressAction, SystemAction) -> Unit,
     updateLaunchApp: (PressAction, LaunchableApp) -> Unit,
     updateRunWhileLocked: (PressAction, Boolean) -> Unit,
+    updateTurnScreenOffAfterWake: (PressAction, Boolean) -> Unit,
     setRemappingEnabled: (Boolean) -> Unit,
     updateHaptic: (HapticStrength) -> Unit,
     previewHaptic: (HapticStrength) -> Unit,
@@ -625,8 +627,13 @@ private fun HomeScreen(
                     gesture = gesture,
                     action = state.draftActions.getValue(gesture),
                     runWhileLocked = state.draftRunWhileLocked[gesture] == true,
+                    turnScreenOffAfterWake =
+                        state.draftTurnScreenOffAfterWake[gesture] == true,
                     onClick = { actionGesture = gesture },
                     onRunWhileLockedChanged = { updateRunWhileLocked(gesture, it) },
+                    onTurnScreenOffAfterWakeChanged = {
+                        updateTurnScreenOffAfterWake(gesture, it)
+                    },
                 )
             }
             item {
@@ -711,9 +718,13 @@ private fun GestureCard(
     gesture: PressAction,
     action: ConfiguredAction,
     runWhileLocked: Boolean,
+    turnScreenOffAfterWake: Boolean,
     onClick: () -> Unit,
     onRunWhileLockedChanged: (Boolean) -> Unit,
+    onTurnScreenOffAfterWakeChanged: (Boolean) -> Unit,
 ) {
+    val canTurnScreenOffAfterWake =
+        runWhileLocked && action != ConfiguredAction.None
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -755,6 +766,36 @@ private fun GestureCard(
                     )
                 }
                 Checkbox(checked = runWhileLocked, onCheckedChange = null)
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 18.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = canTurnScreenOffAfterWake) {
+                        onTurnScreenOffAfterWakeChanged(!turnScreenOffAfterWake)
+                    }
+                    .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        language.t("Turn screen off again", "Снова погасить экран"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        language.t(
+                            "Only if this press woke it",
+                            "Только если это нажатие его разбудило",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Checkbox(
+                    checked = turnScreenOffAfterWake,
+                    onCheckedChange = null,
+                    enabled = canTurnScreenOffAfterWake,
+                )
             }
         }
     }

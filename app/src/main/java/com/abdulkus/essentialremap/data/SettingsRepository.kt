@@ -14,6 +14,7 @@ interface SettingsRepository {
         hapticStrength: HapticStrength,
         actions: Map<PressAction, ConfiguredAction>,
         runWhileLocked: Map<PressAction, Boolean>,
+        turnScreenOffAfterWake: Map<PressAction, Boolean>,
     )
     suspend fun setRemappingEnabled(enabled: Boolean)
     suspend fun setLearning(learning: Boolean)

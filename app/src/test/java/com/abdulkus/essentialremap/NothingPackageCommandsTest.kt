@@ -30,7 +30,7 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun releaseSetupAlsoGrantsLogAccessAndBlocksDisplayWake() {
+    fun releaseSetupAlsoGrantsLogAccessAndAllowsOemWake() {
         assertEquals(
             listOf(
                 "pm disable-user --user 0 com.nothing.ntessentialspace",

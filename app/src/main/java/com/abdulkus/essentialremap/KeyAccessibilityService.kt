@@ -19,6 +19,7 @@ import com.abdulkus.essentialremap.domain.AppSettings
 import com.abdulkus.essentialremap.domain.ConfiguredAction
 import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
+import com.abdulkus.essentialremap.domain.ScreenOffAfterWakePolicy
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class KeyAccessibilityService : AccessibilityService() {
     private lateinit var repository: SettingsRepository
@@ -39,6 +41,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var actionExecutor: ActionExecutor
     private var gestureSequenceActive = false
     private var gestureStartedWhileLocked = false
+    private var gestureStartedScreenOff = false
     private var activeWakeLock: PowerManager.WakeLock? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var currentSettings = AppSettings()
@@ -84,7 +87,10 @@ class KeyAccessibilityService : AccessibilityService() {
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
-                beginGestureSequence(event.repeatCount)
+                beginGestureSequence(
+                    repeatCount = event.repeatCount,
+                    startedScreenOff = !powerManager.isInteractive,
+                )
                 classifier.onKeyDown(event.repeatCount)
             }
             KeyEvent.ACTION_UP -> {
@@ -112,9 +118,11 @@ class KeyAccessibilityService : AccessibilityService() {
 
     private fun executeAction(action: PressAction) {
         val startedWhileLocked = gestureStartedWhileLocked
+        val startedScreenOff = gestureStartedScreenOff
         val wakeLock = activeWakeLock
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
+        gestureStartedScreenOff = false
         activeWakeLock = null
 
         if (!currentSettings.remappingEnabled) {
@@ -131,6 +139,11 @@ class KeyAccessibilityService : AccessibilityService() {
             return
         }
         val config = currentSettings.actions.getValue(action)
+        val turnScreenOffAfterWake = ScreenOffAfterWakePolicy.shouldTurnOff(
+            action = action,
+            startedScreenOff = startedScreenOff,
+            turnScreenOffAfterWake = currentSettings.turnScreenOffAfterWake,
+        )
         if (!ActionFeedbackPolicy.shouldPerformHaptic(config)) {
             releaseWakeLock(wakeLock)
             return
@@ -143,6 +156,11 @@ class KeyAccessibilityService : AccessibilityService() {
                     performGlobalAction = ::performGlobalAction,
                     performNavigationHandleLongPress = ::performNavigationHandleLongPress,
                 )
+                if (turnScreenOffAfterWake) {
+                    withContext(Dispatchers.Main.immediate) {
+                        performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                    }
+                }
                 val prefix = if (result.successful) "Done" else "Error"
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
             } finally {
@@ -151,15 +169,15 @@ class KeyAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun beginGestureSequence(repeatCount: Int) {
+    private fun beginGestureSequence(repeatCount: Int, startedScreenOff: Boolean) {
         if (repeatCount != 0 || gestureSequenceActive) return
         gestureSequenceActive = true
-        gestureStartedWhileLocked =
-            !powerManager.isInteractive || keyguardManager.isKeyguardLocked
+        gestureStartedScreenOff = startedScreenOff
+        gestureStartedWhileLocked = startedScreenOff || keyguardManager.isKeyguardLocked
 
         // The key event itself wakes the input pipeline. Keep only the CPU alive long enough to
         // classify the user's press and dispatch the selected action, never while idle.
-        if (!powerManager.isInteractive && PressAction.entries.any { action ->
+        if (startedScreenOff && PressAction.entries.any { action ->
                 currentSettings.runWhileLocked[action] == true &&
                     currentSettings.actions[action] != ConfiguredAction.None
             }
@@ -178,7 +196,10 @@ class KeyAccessibilityService : AccessibilityService() {
         if (!currentSettings.remappingEnabled) return
         when (event.action) {
             ScreenOffKeyAction.DOWN -> {
-                beginGestureSequence(event.repeatCount)
+                beginGestureSequence(
+                    repeatCount = event.repeatCount,
+                    startedScreenOff = !event.interactive,
+                )
                 classifier.onKeyDown(event.repeatCount)
             }
             ScreenOffKeyAction.UP -> classifier.onKeyUp(canceled = false)
@@ -208,6 +229,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private fun finishGestureSequence() {
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
+        gestureStartedScreenOff = false
         releaseWakeLock(activeWakeLock)
         activeWakeLock = null
     }

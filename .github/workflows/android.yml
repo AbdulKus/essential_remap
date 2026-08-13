@@ -14,12 +14,17 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: 0.1.5
+  APP_VERSION: 0.1.6
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 || secrets.ANDROID_KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Check out source
@@ -40,8 +45,33 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare release signing key
+        shell: bash
+        run: |
+          if [[ -n "$RELEASE_KEYSTORE_BASE64" && \
+                -n "$SIGNING_STORE_PASSWORD" && \
+                -n "$SIGNING_KEY_ALIAS" && \
+                -n "$SIGNING_KEY_PASSWORD" ]]; then
+            signing_file="$RUNNER_TEMP/essential-remap-release.jks"
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$signing_file"
+            chmod 600 "$signing_file"
+            echo "SIGNING_STORE_FILE=$signing_file" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "Signing secrets are unavailable for this pull request; using the repository test key."
+          else
+            echo "::error::Release signing secrets are incomplete. Add SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD."
+            exit 1
+          fi
+
       - name: Test, lint and build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Verify release APK signature
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify \
+            --verbose \
+            --print-certs \
+            app/build/outputs/apk/release/app-release.apk
 
       - name: Prepare APKs
         run: |
