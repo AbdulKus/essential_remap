@@ -54,6 +54,24 @@ class GestureClassifierTest {
     }
 
     @Test
+    fun observedFiveHundredEightyMillisecondHoldUsesConfiguredThreshold() {
+        val scheduler = FakeScheduler()
+        val actions = mutableListOf<PressAction>()
+        val classifier = GestureClassifier(
+            scheduler = scheduler,
+            onAction = actions::add,
+            longPressMs = 500,
+        )
+
+        classifier.onKeyDown(0)
+        scheduler.advanceBy(580)
+        classifier.onKeyUp(false)
+        scheduler.advanceBy(500)
+
+        assertEquals(listOf(PressAction.LONG), actions)
+    }
+
+    @Test
     fun canceledPressDoesNotFire() {
         val scheduler = FakeScheduler()
         val actions = mutableListOf<PressAction>()

@@ -15,6 +15,7 @@ interface SettingsRepository {
         actions: Map<PressAction, ConfiguredAction>,
         runWhileLocked: Map<PressAction, Boolean>,
     )
+    suspend fun setRemappingEnabled(enabled: Boolean)
     suspend fun setLearning(learning: Boolean)
     suspend fun saveMappedKey(identity: KeyIdentity)
     suspend fun saveResult(action: PressAction, result: String)

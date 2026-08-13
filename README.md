@@ -15,6 +15,7 @@ The app is designed for Nothing OS and includes Russian and English interfaces.
 - Normal, vibrate, silent, and silent/normal toggle.
 - Open URLs/deep links and send GET/POST webhooks.
 - Four haptic strengths.
+- Master remapping switch; gestures assigned to **No action** do not vibrate.
 - Per-gesture lock-screen and screen-off execution.
 - Built-in, reversible Wireless ADB setup; no PC or root is required.
 
@@ -32,6 +33,8 @@ The onboarding can pair with Android's local Wireless ADB service and run only t
 ```sh
 pm disable-user --user 0 com.nothing.ntessentialspace
 pm disable-user --user 0 com.nothing.ntessentialrecorder
+pm grant com.abdulkus.essentialremap android.permission.READ_LOGS
+settings put secure nt_block_essential_key 1
 ```
 
 No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
@@ -40,9 +43,11 @@ After the key is released, an `AccessibilityService` requests Android's key-even
 
 ## Lock screen and sleep
 
-Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI. If the display is off, the app takes a timeout-bound partial wake lock only after the physical key event arrives, then releases it immediately after classifying and dispatching the action. It never keeps the CPU awake while waiting for a press.
+Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
 
-Android can deliver a key from hardware suspend only when the device key layout or firmware marks that internal key as wake-capable. A regular app cannot add that system `WAKE` flag. If a Nothing OS build does not deliver scan code `250` from deep sleep, lock-screen execution still works while the display is on, but true screen-off wake requires a rooted/system key-layout change.
+On the tested Nothing OS build, `nt_block_essential_key=1` keeps the display off but WindowManager still records the Essential Key's `ACTION_DOWN` and `ACTION_UP` entries. With the ADB-granted `READ_LOGS` development permission, Essential Remap starts a logcat process filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. It does not store or transmit logs. The waiting reader holds no wake lock. After a real key-down arrives, the app takes a timeout-bound partial wake lock only long enough to classify and dispatch the action, then releases it.
+
+The screen-off bridge runs only when remapping is enabled and at least one configured action is allowed while locked. It is firmware-specific: a future Nothing OS update could remove or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
 
 ## Circle to Search
 
@@ -55,7 +60,7 @@ Download the signed APK from [Releases](../../releases). The first release uses 
 On first launch:
 
 1. Choose Russian or English.
-2. Confirm the Essential Key is released, or use the built-in Wireless ADB flow.
+2. Use the built-in Wireless ADB flow to release the Essential Key and grant screen-off access.
 3. Enable **Essential Remap key listener** in Android Accessibility settings.
 4. Choose actions and save.
 
@@ -73,7 +78,7 @@ Every push to `main` builds debug and release APKs. The first successful build f
 
 ## Privacy
 
-All settings stay on the device. Internet permission exists only for user-configured HTTP actions. Wireless ADB credentials are generated and stored locally by Android's app storage. No analytics or telemetry is included.
+All settings stay on the device. Internet permission exists only for user-configured HTTP actions. Wireless ADB credentials are generated and stored locally by Android's app storage. `READ_LOGS` is used only by the on-device, narrowly filtered Essential Key reader; log contents are not saved or transmitted. No analytics or telemetry is included.
 
 ## License and attribution
 

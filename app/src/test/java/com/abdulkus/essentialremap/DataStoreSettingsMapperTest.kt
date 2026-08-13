@@ -26,6 +26,7 @@ class DataStoreSettingsMapperTest {
             stringPreferencesKey("SINGLE_url") to "http://192.168.1.5/hook",
             stringPreferencesKey("SINGLE_haptic") to "STRONG",
             booleanPreferencesKey("DOUBLE_run_while_locked") to true,
+            booleanPreferencesKey("remapping_enabled") to false,
             stringPreferencesKey("base_url") to "http://home-automation.local",
         )
 
@@ -38,6 +39,7 @@ class DataStoreSettingsMapperTest {
         assertEquals(HapticStrength.STRONG, settings.hapticStrength)
         assertEquals(true, settings.runWhileLocked.getValue(PressAction.DOUBLE))
         assertEquals(false, settings.runWhileLocked.getValue(PressAction.SINGLE))
+        assertEquals(false, settings.remappingEnabled)
         assertEquals(
             ConfiguredAction.PerformSystemAction(SystemAction.CIRCLE_TO_SEARCH),
             settings.actions.getValue(PressAction.DOUBLE),

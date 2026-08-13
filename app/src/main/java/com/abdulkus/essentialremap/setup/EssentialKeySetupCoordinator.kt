@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import com.abdulkus.essentialremap.MainActivity
 import com.abdulkus.essentialremap.R
+import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import io.github.muntashirakon.adb.android.AdbMdns
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -43,6 +44,7 @@ enum class SetupPhase {
 
 data class EssentialKeySetupState(
     val packageStatus: NothingPackageStatus = NothingPackageStatus.UNKNOWN,
+    val screenOffAccessGranted: Boolean = false,
     val phase: SetupPhase = SetupPhase.IDLE,
     val operation: PackageOperation? = null,
     val message: String? = null,
@@ -73,7 +75,10 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
     private val notificationManager = NotificationManagerCompat.from(appContext)
     private val diagnostics = SetupDiagnostics(appContext)
     private val _state = MutableStateFlow(
-        EssentialKeySetupState(packageStatus = statusReader.read()),
+        EssentialKeySetupState(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+        ),
     )
     override val state: StateFlow<EssentialKeySetupState> = _state.asStateFlow()
 
@@ -86,7 +91,10 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
     }
 
     override fun refresh() {
-        _state.value = _state.value.copy(packageStatus = statusReader.read())
+        _state.value = _state.value.copy(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+        )
     }
 
     override fun start(operation: PackageOperation) {
@@ -94,6 +102,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         pairingCode = CompletableDeferred()
         _state.value = EssentialKeySetupState(
             packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
             phase = SetupPhase.WAITING_FOR_CODE,
             operation = operation,
             message = text(
@@ -117,6 +126,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 diagnostics.log("Setup failed: ${error.fullDescription()}")
                 _state.value = _state.value.copy(
                     packageStatus = statusReader.read(),
+                    screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
                     phase = SetupPhase.ERROR,
                     message = friendlyError(error),
                 )
@@ -148,7 +158,10 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         diagnostics.log("Setup cancelled by user")
         setupJob?.cancel()
         notificationManager.cancel(NOTIFICATION_ID)
-        _state.value = EssentialKeySetupState(packageStatus = statusReader.read())
+        _state.value = EssentialKeySetupState(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+        )
     }
 
     override fun diagnosticReport(): String = diagnostics.report()
@@ -208,24 +221,27 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 },
             )
             postProgressNotification()
-            NothingPackageCommands.commands(operation).forEach { command ->
+            EssentialKeySetupCommands.commands(operation).forEach { command ->
                 diagnostics.log("Executing allowlisted command: $command")
                 val output = executeAllowlisted(connectedManager, command)
                 diagnostics.log("Command output: ${output.take(MAX_LOG_OUTPUT_CHARS)}")
-                if (!output.contains("new state:", ignoreCase = true)) {
-                    error(output.ifBlank { "Android did not confirm the package change" })
-                }
             }
             val packageStatus = verifyPackageState(connectedManager, operation)
+            val screenOffAccessGranted = if (operation == PackageOperation.DISABLE) {
+                verifyScreenOffAccess(connectedManager)
+            } else {
+                ScreenOffKeyAccess.isGranted(appContext)
+            }
             diagnostics.log("Package verification succeeded: status=$packageStatus")
             _state.value = EssentialKeySetupState(
                 packageStatus = packageStatus,
+                screenOffAccessGranted = screenOffAccessGranted,
                 phase = SetupPhase.COMPLETE,
                 operation = operation,
                 message = if (operation == PackageOperation.DISABLE) {
                     text(
-                        "Essential Key released. You can turn off Wireless debugging.",
-                        "Essential Key освобождена. Wireless debugging можно выключить.",
+                        "Essential Key released and screen-off access enabled. You can turn off Wireless debugging.",
+                        "Essential Key освобождена, работа с погашенным экраном включена. Wireless debugging можно выключить.",
                     )
                 } else {
                     text(
@@ -235,6 +251,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 },
             )
             val successMessage = _state.value.message.orEmpty()
+            ScreenOffKeyAccess.notifyChanged()
             postResultNotification(text("Setup complete", "Настройка завершена"), successMessage)
             returnToApp()
         } finally {
@@ -265,13 +282,33 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         manager: LocalAdbConnectionManager,
         command: String,
     ): String {
-        require(command in NothingPackageCommands.commands(PackageOperation.DISABLE) ||
-            command in NothingPackageCommands.commands(PackageOperation.RESTORE)) {
+        require(EssentialKeySetupCommands.isAllowlisted(command)) {
             "Command is not allowlisted"
         }
-        return readShellOutput(manager, command) {
-            it.contains("new state:", ignoreCase = true)
+        val needsMarker = command == EssentialKeySetupCommands.GRANT_READ_LOGS ||
+            command == EssentialKeySetupCommands.BLOCK_SCREEN_OFF_WAKE
+        return readShellOutput(manager, command) { output ->
+            if (needsMarker) {
+                output.contains(EssentialKeySetupCommands.COMMAND_OK)
+            } else {
+                output.contains("new state:", ignoreCase = true)
+            }
         }.trim()
+    }
+
+    private fun verifyScreenOffAccess(manager: LocalAdbConnectionManager): Boolean {
+        if (!ScreenOffKeyAccess.isGranted(appContext)) {
+            error("Android did not grant system-log access")
+        }
+        val output = readShellOutput(
+            manager,
+            EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
+        ) { it.lineSequence().any { line -> line.trim() == "1" } }
+        if (output.lineSequence().none { it.trim() == "1" }) {
+            error("Android did not keep the Essential Key blocked from waking the display")
+        }
+        diagnostics.log("Screen-off access verified: READ_LOGS granted, nt_block_essential_key=1")
+        return true
     }
 
     private suspend fun connectWithRetry(): LocalAdbConnectionManager {

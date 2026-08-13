@@ -198,6 +198,13 @@ class MapperViewModel(
         }
     }
 
+    fun setRemappingEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            runCatching { repository.setRemappingEnabled(enabled) }
+                .onFailure { _messages.emit("Could not change remapping state") }
+        }
+    }
+
     fun save() {
         val state = _uiState.value
         val baseUrlErrors = state.draftActions.mapNotNull { (gesture, action) ->

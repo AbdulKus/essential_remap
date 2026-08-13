@@ -163,6 +163,19 @@ class MapperViewModelTest {
         assertTrue(viewModel.uiState.value.readyToMap)
     }
 
+    @Test
+    fun masterSwitchChangesRuntimeStateImmediately() = runTest(dispatcher) {
+        val repository = FakeRepository()
+        val viewModel = MapperViewModel(repository, FakeHapticEngine(), FakeSetup())
+        advanceUntilIdle()
+
+        viewModel.setRemappingEnabled(false)
+        advanceUntilIdle()
+
+        assertFalse(repository.state.value.remappingEnabled)
+        assertFalse(viewModel.uiState.value.settings.remappingEnabled)
+    }
+
     private class FakeRepository : SettingsRepository {
         val state = MutableStateFlow(
             AppSettings(
@@ -184,6 +197,10 @@ class MapperViewModelTest {
                 actions = actions,
                 runWhileLocked = runWhileLocked,
             )
+        }
+
+        override suspend fun setRemappingEnabled(enabled: Boolean) {
+            state.value = state.value.copy(remappingEnabled = enabled)
         }
 
         override suspend fun setLearning(learning: Boolean) {

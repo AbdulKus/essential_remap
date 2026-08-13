@@ -14,7 +14,9 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import com.abdulkus.essentialremap.data.SettingsRepository
+import com.abdulkus.essentialremap.domain.ActionFeedbackPolicy
 import com.abdulkus.essentialremap.domain.AppSettings
+import com.abdulkus.essentialremap.domain.ConfiguredAction
 import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
 import com.abdulkus.essentialremap.haptics.HapticEngine
@@ -30,6 +32,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var repository: SettingsRepository
     private lateinit var hapticEngine: HapticEngine
     private lateinit var classifier: GestureClassifier
+    private lateinit var screenOffKeyLogReader: ScreenOffKeyLogReader
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -37,6 +40,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private var gestureSequenceActive = false
     private var gestureStartedWhileLocked = false
     private var activeWakeLock: PowerManager.WakeLock? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile private var currentSettings = AppSettings()
 
     override fun onServiceConnected() {
@@ -50,11 +54,23 @@ class KeyAccessibilityService : AccessibilityService() {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
         classifier = GestureClassifier(
-            scheduler = HandlerScheduler(Handler(Looper.getMainLooper())),
+            scheduler = HandlerScheduler(mainHandler),
             onAction = ::executeAction,
+            longPressMs = LONG_PRESS_MS,
         )
+        screenOffKeyLogReader = ScreenOffKeyLogReader { event ->
+            mainHandler.post { handleScreenOffKeyEvent(event) }
+        }
         serviceScope.launch {
-            repository.settings.collectLatest { currentSettings = it }
+            repository.settings.collectLatest { settings ->
+                currentSettings = settings
+                mainHandler.post(::applyRuntimeState)
+            }
+        }
+        serviceScope.launch {
+            ScreenOffKeyAccess.changes.collectLatest {
+                mainHandler.post(::applyRuntimeState)
+            }
         }
     }
 
@@ -64,6 +80,7 @@ class KeyAccessibilityService : AccessibilityService() {
         // the scan code avoids stealing ordinary buttons while remaining stable across input-device
         // descriptor changes after a Nothing OS update.
         if (event.scanCode != ESSENTIAL_KEY_SCAN_CODE) return false
+        if (!currentSettings.remappingEnabled) return false
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
@@ -87,6 +104,7 @@ class KeyAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (::classifier.isInitialized) classifier.reset()
+        if (::screenOffKeyLogReader.isInitialized) screenOffKeyLogReader.close()
         finishGestureSequence()
         serviceScope.cancel()
         super.onDestroy()
@@ -99,6 +117,10 @@ class KeyAccessibilityService : AccessibilityService() {
         gestureStartedWhileLocked = false
         activeWakeLock = null
 
+        if (!currentSettings.remappingEnabled) {
+            releaseWakeLock(wakeLock)
+            return
+        }
         if (!LockScreenExecutionPolicy.shouldRun(
                 action = action,
                 startedWhileLocked = startedWhileLocked,
@@ -109,6 +131,10 @@ class KeyAccessibilityService : AccessibilityService() {
             return
         }
         val config = currentSettings.actions.getValue(action)
+        if (!ActionFeedbackPolicy.shouldPerformHaptic(config)) {
+            releaseWakeLock(wakeLock)
+            return
+        }
         hapticEngine.perform(currentSettings.hapticStrength)
         serviceScope.launch {
             try {
@@ -133,7 +159,11 @@ class KeyAccessibilityService : AccessibilityService() {
 
         // The key event itself wakes the input pipeline. Keep only the CPU alive long enough to
         // classify the user's press and dispatch the selected action, never while idle.
-        if (!powerManager.isInteractive && currentSettings.runWhileLocked.values.any { it }) {
+        if (!powerManager.isInteractive && PressAction.entries.any { action ->
+                currentSettings.runWhileLocked[action] == true &&
+                    currentSettings.actions[action] != ConfiguredAction.None
+            }
+        ) {
             activeWakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 WAKE_LOCK_TAG,
@@ -143,6 +173,36 @@ class KeyAccessibilityService : AccessibilityService() {
             }
         }
     }
+
+    private fun handleScreenOffKeyEvent(event: ScreenOffKeyEvent) {
+        if (!currentSettings.remappingEnabled || event.interactive) return
+        when (event.action) {
+            ScreenOffKeyAction.DOWN -> {
+                beginGestureSequence(event.repeatCount)
+                classifier.onKeyDown(event.repeatCount)
+            }
+            ScreenOffKeyAction.UP -> classifier.onKeyUp(canceled = false)
+        }
+    }
+
+    private fun applyRuntimeState() {
+        if (!::classifier.isInitialized || !::screenOffKeyLogReader.isInitialized) return
+        if (shouldReadScreenOffKey()) {
+            screenOffKeyLogReader.start()
+        } else {
+            screenOffKeyLogReader.stop()
+            classifier.reset()
+            finishGestureSequence()
+        }
+    }
+
+    private fun shouldReadScreenOffKey(): Boolean =
+        currentSettings.remappingEnabled &&
+            ScreenOffKeyAccess.isGranted(this) &&
+            PressAction.entries.any { action ->
+                currentSettings.runWhileLocked[action] == true &&
+                    currentSettings.actions[action] != ConfiguredAction.None
+            }
 
     private fun finishGestureSequence() {
         gestureSequenceActive = false
@@ -196,6 +256,7 @@ class KeyAccessibilityService : AccessibilityService() {
 
     private companion object {
         const val ESSENTIAL_KEY_SCAN_CODE = 250
+        const val LONG_PRESS_MS = 500L
         const val NAVIGATION_LONG_PRESS_MS = 700L
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"

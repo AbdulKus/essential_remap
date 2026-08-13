@@ -52,6 +52,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
@@ -162,6 +163,7 @@ fun EssentialRemapApp(
         updateSystemAction = viewModel::updateSystemAction,
         updateLaunchApp = viewModel::updateLaunchApp,
         updateRunWhileLocked = viewModel::updateRunWhileLocked,
+        setRemappingEnabled = viewModel::setRemappingEnabled,
         updateHaptic = viewModel::updateHaptic,
         previewHaptic = viewModel::previewHaptic,
         save = viewModel::save,
@@ -262,6 +264,7 @@ private fun OnboardingScreen(
     var page by rememberSaveable { mutableStateOf(0) }
     var pairingCode by rememberSaveable { mutableStateOf("") }
     val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
+    val screenOffReady = state.setup.screenOffAccessGranted
     val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
 
     Scaffold { padding ->
@@ -311,7 +314,7 @@ private fun OnboardingScreen(
                 Button(
                     onClick = { if (page == 2) finish() else page++ },
                     enabled = when (page) {
-                        0 -> keyReleased
+                        0 -> keyReleased && screenOffReady
                         1 -> serviceReady
                         else -> true
                     },
@@ -354,16 +357,39 @@ private fun ReleaseKeyStep(
             "Пакеты Nothing: Essential Space + Essential Recorder",
         ),
     )
+    Spacer(Modifier.height(10.dp))
+    StatusCard(
+        success = state.setup.screenOffAccessGranted,
+        title = if (state.setup.screenOffAccessGranted) {
+            language.t("Screen-off access is ready", "Работа с погашенным экраном готова")
+        } else {
+            language.t("Screen-off access is not configured", "Работа с погашенным экраном не настроена")
+        },
+        detail = language.t(
+            "Reads only Essential Key entries from the system log",
+            "Читаются только записи Essential Key из системного журнала",
+        ),
+    )
     Spacer(Modifier.height(14.dp))
     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
         SetupProgress(language, state, pairingCode, changePairingCode, submitPairingCode, cancelPackageSetup)
     }
-    if (state.setup.packageStatus != NothingPackageStatus.DISABLED && !state.setup.busy) {
+    if ((state.setup.packageStatus != NothingPackageStatus.DISABLED ||
+            !state.setup.screenOffAccessGranted) && !state.setup.busy
+    ) {
         Button(
             onClick = { beginPackageSetup(PackageOperation.DISABLE) },
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 14.dp),
-        ) { Text(language.t("SET UP WITH WIRELESS ADB", "НАСТРОИТЬ ЧЕРЕЗ WIRELESS ADB")) }
+        ) {
+            Text(
+                if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
+                    language.t("ENABLE SCREEN-OFF ACCESS", "ВКЛЮЧИТЬ РАБОТУ ВО СНЕ")
+                } else {
+                    language.t("SET UP WITH WIRELESS ADB", "НАСТРОИТЬ ЧЕРЕЗ WIRELESS ADB")
+                },
+            )
+        }
         TextButton(onClick = openDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
             Text(language.t("Open developer options", "Открыть настройки разработчика"))
         }
@@ -415,8 +441,8 @@ private fun ReadyStep(language: AppLanguage) {
         "03",
         language.t("Ready", "Готово"),
         language.t(
-            "The button now works everywhere after unlock. Change any mapping on the next screen.",
-            "Теперь кнопка работает в любых приложениях после разблокировки. Любое действие можно поменять на следующем экране.",
+            "The button now works with the display on or off. Change any mapping on the next screen.",
+            "Теперь кнопка работает с включённым и погашенным экраном. Любое действие можно поменять на следующем экране.",
         ),
     )
     Spacer(Modifier.height(24.dp))
@@ -480,7 +506,9 @@ private fun SetupProgress(
 @Composable
 private fun ManualCommands(language: AppLanguage, copyText: (String) -> Unit) {
     val commands = "adb shell pm disable-user --user 0 com.nothing.ntessentialspace\n" +
-        "adb shell pm disable-user --user 0 com.nothing.ntessentialrecorder"
+        "adb shell pm disable-user --user 0 com.nothing.ntessentialrecorder\n" +
+        "adb shell pm grant com.abdulkus.essentialremap android.permission.READ_LOGS\n" +
+        "adb shell settings put secure nt_block_essential_key 1"
     var expanded by rememberSaveable { mutableStateOf(false) }
     TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
         Text(language.t("Manual ADB commands", "Команды ADB вручную"))
@@ -518,6 +546,7 @@ private fun HomeScreen(
     updateSystemAction: (PressAction, SystemAction) -> Unit,
     updateLaunchApp: (PressAction, LaunchableApp) -> Unit,
     updateRunWhileLocked: (PressAction, Boolean) -> Unit,
+    setRemappingEnabled: (Boolean) -> Unit,
     updateHaptic: (HapticStrength) -> Unit,
     previewHaptic: (HapticStrength) -> Unit,
     save: () -> Unit,
@@ -530,7 +559,8 @@ private fun HomeScreen(
     var httpGesture by remember { mutableStateOf<PressAction?>(null) }
     var soundGesture by remember { mutableStateOf<PressAction?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    val ready = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
+    val setupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
+    val ready = setupReady && state.settings.remappingEnabled
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -561,9 +591,16 @@ private fun HomeScreen(
                     Column(Modifier.padding(start = 12.dp).weight(1f)) {
                         Text("ESSENTIAL REMAP", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(
-                            if (ready) language.t("ACTIVE", "АКТИВНО")
-                            else language.t("SETUP REQUIRED", "НУЖНА НАСТРОЙКА"),
-                            color = if (ready) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                            when {
+                                ready -> language.t("ACTIVE", "АКТИВНО")
+                                setupReady -> language.t("PAUSED", "ПРИОСТАНОВЛЕНО")
+                                else -> language.t("SETUP REQUIRED", "НУЖНА НАСТРОЙКА")
+                            },
+                            color = when {
+                                ready -> Color(0xFF2E7D32)
+                                setupReady -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.error
+                            },
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -574,7 +611,7 @@ private fun HomeScreen(
                 Spacer(Modifier.height(28.dp))
                 Text(language.t("BUTTON ACTIONS", "ДЕЙСТВИЯ КНОПКИ"), style = MaterialTheme.typography.labelLarge)
             }
-            if (!ready) {
+            if (!setupReady) {
                 item {
                     WarningCard(language.t(
                         "The listener or Nothing package setup is inactive. Open settings to repair it.",
@@ -599,8 +636,8 @@ private fun HomeScreen(
             item {
                 Text(
                     language.t(
-                        "Single press waits 300 ms to distinguish a double press. Hold activates after 600 ms.",
-                        "Одиночное нажатие ждёт 300 мс, чтобы отличить двойное. Удержание срабатывает через 600 мс.",
+                        "Single press waits 300 ms to distinguish a double press. Hold activates after 500 ms.",
+                        "Одиночное нажатие ждёт 300 мс, чтобы отличить двойное. Удержание срабатывает через 500 мс.",
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
@@ -675,6 +712,7 @@ private fun HomeScreen(
             copyText,
             changeLanguage,
             runSetupAgain,
+            setRemappingEnabled,
         )
     }
 }
@@ -970,6 +1008,7 @@ private fun SettingsDialog(
     copyText: (String) -> Unit,
     changeLanguage: (AppLanguage) -> Unit,
     runSetupAgain: () -> Unit,
+    setRemappingEnabled: (Boolean) -> Unit,
 ) {
     var pairingCode by rememberSaveable { mutableStateOf("") }
     Dialog(onDismissRequest = dismiss) {
@@ -984,7 +1023,16 @@ private fun SettingsDialog(
                     StatusCard(
                         state.setup.packageStatus == NothingPackageStatus.DISABLED,
                         packageStatusTitle(language, state.setup.packageStatus),
-                        "scan code 250",
+                        language.t("Essential Space package state", "Состояние пакетов Essential Space"),
+                    )
+                    StatusCard(
+                        state.setup.screenOffAccessGranted,
+                        if (state.setup.screenOffAccessGranted) {
+                            language.t("Screen-off access enabled", "Работа с погашенным экраном включена")
+                        } else {
+                            language.t("Screen-off access needs setup", "Нужно настроить работу с погашенным экраном")
+                        },
+                        language.t("No permanent wake lock", "Без постоянного удержания процессора"),
                     )
                     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR) {
                         SetupProgress(language, state, pairingCode, { pairingCode = it.filter(Char::isDigit).take(6) }, submitPairingCode, cancelPackageSetup)
@@ -994,14 +1042,24 @@ private fun SettingsDialog(
                             OutlinedButton(onClick = { beginPackageSetup(PackageOperation.RESTORE) }, modifier = Modifier.weight(1f)) {
                                 Text(language.t("RESTORE SPACE", "ВЕРНУТЬ SPACE"), textAlign = TextAlign.Center)
                             }
-                        } else {
                             Button(onClick = { beginPackageSetup(PackageOperation.DISABLE) }, modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (state.setup.screenOffAccessGranted) {
+                                        language.t("REPAIR SLEEP", "ИСПРАВИТЬ СОН")
+                                    } else {
+                                        language.t("ENABLE SLEEP", "РАБОТА ВО СНЕ")
+                                    },
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        } else {
+                            Button(onClick = { beginPackageSetup(PackageOperation.DISABLE) }, modifier = Modifier.fillMaxWidth()) {
                                 Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ"))
                             }
                         }
-                        OutlinedButton(onClick = openDeveloperOptions, modifier = Modifier.weight(1f)) {
-                            Text("WIRELESS ADB", textAlign = TextAlign.Center)
-                        }
+                    }
+                    TextButton(onClick = openDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
+                        Text("WIRELESS ADB")
                     }
                     ManualCommands(language, copyText)
                     HorizontalDivider()
@@ -1021,6 +1079,16 @@ private fun SettingsDialog(
                     }
                     HorizontalDivider()
                     SectionLabel(language.t("APP", "ПРИЛОЖЕНИЕ"))
+                    SettingsSwitchRow(
+                        title = language.t("Remapping", "Переназначение кнопки"),
+                        subtitle = if (state.settings.remappingEnabled) {
+                            language.t("Enabled", "Включено")
+                        } else {
+                            language.t("Paused", "Приостановлено")
+                        },
+                        checked = state.settings.remappingEnabled,
+                        onCheckedChange = setRemappingEnabled,
+                    )
                     SettingsRow(language.t("Run setup again", "Повторить первоначальную настройку"), null) { dismiss(); runSetupAgain() }
                     SettingsRow(language.t("Android app info", "Информация о приложении"), null, openAppInfo)
                     WarningCard(language.t(
@@ -1094,6 +1162,30 @@ private fun SettingsRow(title: String, subtitle: String?, click: () -> Unit) {
             subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
         }
         Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    subtitle: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Medium)
+            subtitle?.let {
+                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

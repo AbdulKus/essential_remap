@@ -54,6 +54,10 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         }
     }
 
+    override suspend fun setRemappingEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.REMAPPING_ENABLED] = enabled }
+    }
+
     override suspend fun setLearning(learning: Boolean) {
         dataStore.edit { it[Keys.LEARNING] = learning }
     }
@@ -140,6 +144,7 @@ internal fun preferencesToSettings(preferences: Preferences): AppSettings {
         preferences[Keys.COMMON_HAPTIC] ?: preferences[Keys.haptic(PressAction.SINGLE)]
         ).toEnumOrDefault(HapticStrength.MEDIUM)
     return AppSettings(
+        remappingEnabled = preferences[Keys.REMAPPING_ENABLED] ?: true,
         mappedKey = mappedKey,
         hapticStrength = commonHaptic,
         actions = actions,
@@ -194,6 +199,7 @@ private object Keys {
     val MIGRATED = booleanPreferencesKey("legacy_migrated")
     val BASE_URL = stringPreferencesKey("base_url")
     val COMMON_HAPTIC = stringPreferencesKey("common_haptic")
+    val REMAPPING_ENABLED = booleanPreferencesKey("remapping_enabled")
     val LEARNING = booleanPreferencesKey("learning")
     val KEY_PRESENT = booleanPreferencesKey("key_present")
     val KEY_CODE = intPreferencesKey("key_code")

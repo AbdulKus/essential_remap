@@ -130,6 +130,7 @@ data class KeyIdentity(
 }
 
 data class AppSettings(
+    val remappingEnabled: Boolean = true,
     val mappedKey: KeyIdentity? = null,
     val hapticStrength: HapticStrength = HapticStrength.MEDIUM,
     val actions: Map<PressAction, ConfiguredAction> = defaultActions(),
@@ -148,6 +149,10 @@ data class AppSettings(
         fun defaultRunWhileLocked(): Map<PressAction, Boolean> =
             PressAction.entries.associateWith { false }
     }
+}
+
+object ActionFeedbackPolicy {
+    fun shouldPerformHaptic(action: ConfiguredAction): Boolean = action != ConfiguredAction.None
 }
 
 object LockScreenExecutionPolicy {
