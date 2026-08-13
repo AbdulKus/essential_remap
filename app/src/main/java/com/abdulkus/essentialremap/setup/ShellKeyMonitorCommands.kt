@@ -47,8 +47,13 @@ object ShellKeyMonitorCommands {
         }
 
         cleanup_monitor() {
-          [ -n "${'$'}logcat_pid" ] && /system/bin/kill "${'$'}logcat_pid" >/dev/null 2>&1
-          /system/bin/rm -f "${'$'}PID_FILE" "${'$'}EVENT_PIPE"
+          children_file="/proc/${'$'}${'$'}/task/${'$'}${'$'}/children"
+          child_pids=
+          [ -r "${'$'}children_file" ] && IFS= read -r child_pids < "${'$'}children_file"
+          for child_pid in ${'$'}child_pids; do
+            /system/bin/kill "${'$'}child_pid" >/dev/null 2>&1
+          done
+          /system/bin/rm -f "${'$'}PID_FILE"
         }
 
         send_event() {
@@ -64,18 +69,12 @@ object ShellKeyMonitorCommands {
 
         run_monitor() {
           trap '' HUP
-          EVENT_PIPE="${'$'}DIR/key-events.pipe"
-          logcat_pid=
           trap cleanup_monitor EXIT
           trap 'exit 0' INT TERM
-          /system/bin/rm -f "${'$'}EVENT_PIPE"
-          /system/bin/mkfifo "${'$'}EVENT_PIPE" || exit 1
           active_down_time=
           /system/bin/logcat -b system -v brief -T 1 \
             '--regex=interceptKeyBeforeQueueing.*scanCode=250' 'WindowManager:D' '*:S' \
-            >"${'$'}EVENT_PIPE" 2>&1 &
-          logcat_pid=${'$'}!
-          while IFS= read -r line; do
+            2>&1 | while IFS= read -r line; do
             case "${'$'}line" in
               *interceptKeyBeforeQueueing*scanCode=250*) ;;
               *) continue ;;
@@ -105,7 +104,7 @@ object ShellKeyMonitorCommands {
                 active_down_time=
                 ;;
             esac
-          done < "${'$'}EVENT_PIPE"
+          done
         }
 
         case "${'$'}1" in

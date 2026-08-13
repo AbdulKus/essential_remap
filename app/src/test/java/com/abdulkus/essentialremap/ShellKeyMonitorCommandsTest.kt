@@ -28,6 +28,17 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
+    fun monitorUsesAnonymousPipeAndCleansUpChildProcesses() {
+        val script = ShellKeyMonitorCommands.scriptForTesting()
+
+        assertFalse(script.contains("mkfifo"))
+        assertFalse(script.contains("key-events.pipe"))
+        assertTrue(script.contains("2>&1 | while IFS= read -r line"))
+        assertTrue(script.contains("/children"))
+        assertTrue(script.contains("kill \"${'$'}child_pid\""))
+    }
+
+    @Test
     fun installerStreamsPayloadThroughAHereDocument() {
         val installer = ShellKeyMonitorCommands.installSessionScript
 
