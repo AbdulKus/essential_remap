@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
@@ -92,16 +93,27 @@ class KeyAccessibilityService : AccessibilityService() {
      * Circle to Search gesture at the centre of the navigation handle (or Home button).
      */
     private fun performNavigationHandleLongPress(): Boolean {
-        val windowManager = getSystemService(WindowManager::class.java)
-        val metrics = windowManager.currentWindowMetrics
-        val bounds = metrics.bounds
-        val navigationInset = metrics.windowInsets
-            .getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
-            .bottom
         val fallbackInset = (24f * resources.displayMetrics.density).toInt()
-        val bottomInset = navigationInset.takeIf { it > 0 } ?: fallbackInset
+        val (centreX, bottom, bottomInset) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metrics = getSystemService(WindowManager::class.java).currentWindowMetrics
+            val navigationInset = metrics.windowInsets
+                .getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
+                .bottom
+            Triple(
+                metrics.bounds.exactCenterX(),
+                metrics.bounds.bottom.toFloat(),
+                navigationInset.takeIf { it > 0 } ?: fallbackInset,
+            )
+        } else {
+            val displayMetrics = resources.displayMetrics
+            Triple(
+                displayMetrics.widthPixels / 2f,
+                displayMetrics.heightPixels.toFloat(),
+                fallbackInset,
+            )
+        }
         val path = Path().apply {
-            moveTo(bounds.exactCenterX(), bounds.bottom - bottomInset / 2f)
+            moveTo(centreX, bottom - bottomInset / 2f)
         }
         val gesture = GestureDescription.Builder()
             .addStroke(

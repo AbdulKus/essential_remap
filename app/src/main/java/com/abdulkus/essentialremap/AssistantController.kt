@@ -54,60 +54,63 @@ class AssistantController(context: Context) {
      * system context and opens Google Home instead, so mirror the SystemUI session request here.
      */
     @Suppress("PrivateApi")
-    private fun requestCircleToSearchSession(): Boolean = runCatching {
-        val args = Bundle().apply {
-            putLong(INVOCATION_TIME_MS_KEY, SystemClock.elapsedRealtime())
-            putInt(INVOCATION_TYPE_KEY, INVOCATION_TYPE_NAV_HANDLE_LONG_PRESS)
-            putInt(OMNI_ENTRY_POINT_KEY, OMNI_ENTRY_POINT_HOME)
-        }
+    private fun requestCircleToSearchSession(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        return runCatching {
+            val args = Bundle().apply {
+                putLong(INVOCATION_TIME_MS_KEY, SystemClock.elapsedRealtime())
+                putInt(INVOCATION_TYPE_KEY, INVOCATION_TYPE_NAV_HANDLE_LONG_PRESS)
+                putInt(OMNI_ENTRY_POINT_KEY, OMNI_ENTRY_POINT_HOME)
+            }
 
-        val serviceManagerClass = Class.forName("android.os.ServiceManager")
-        val binder = HiddenApiBypass.invoke(
-            serviceManagerClass,
-            null,
-            "getService",
-            VOICE_INTERACTION_SERVICE,
-        ) as? IBinder
-            ?: return@runCatching false
-
-        val managerClass = Class.forName(
-            "com.android.internal.app.IVoiceInteractionManagerService",
-        )
-        val stubClass = Class.forName(
-            "com.android.internal.app.IVoiceInteractionManagerService\$Stub",
-        )
-        val manager = HiddenApiBypass.invoke(
-            stubClass,
-            null,
-            "asInterface",
-            binder,
-        )
-            ?: return@runCatching false
-
-        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            HiddenApiBypass.invoke(
-                managerClass,
-                manager,
-                "showSessionFromSession",
+            val serviceManagerClass = Class.forName("android.os.ServiceManager")
+            val binder = HiddenApiBypass.invoke(
+                serviceManagerClass,
                 null,
-                args,
-                SESSION_SOURCE_FLAGS,
-                CIRCLE_TO_SEARCH_ATTRIBUTION,
+                "getService",
+                VOICE_INTERACTION_SERVICE,
+            ) as? IBinder
+                ?: return@runCatching false
+
+            val managerClass = Class.forName(
+                "com.android.internal.app.IVoiceInteractionManagerService",
             )
-        } else {
-            HiddenApiBypass.invoke(
-                managerClass,
-                manager,
-                "showSessionFromSession",
+            val stubClass = Class.forName(
+                "com.android.internal.app.IVoiceInteractionManagerService\$Stub",
+            )
+            val manager = HiddenApiBypass.invoke(
+                stubClass,
                 null,
-                args,
-                SESSION_SOURCE_FLAGS,
+                "asInterface",
+                binder,
             )
-        }
-        result as? Boolean ?: false
-    }.onFailure {
-        Log.w(TAG, "Direct Circle to Search session failed; trying navigation gesture", it)
-    }.getOrDefault(false)
+                ?: return@runCatching false
+
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                HiddenApiBypass.invoke(
+                    managerClass,
+                    manager,
+                    "showSessionFromSession",
+                    null,
+                    args,
+                    SESSION_SOURCE_FLAGS,
+                    CIRCLE_TO_SEARCH_ATTRIBUTION,
+                )
+            } else {
+                HiddenApiBypass.invoke(
+                    managerClass,
+                    manager,
+                    "showSessionFromSession",
+                    null,
+                    args,
+                    SESSION_SOURCE_FLAGS,
+                )
+            }
+            result as? Boolean ?: false
+        }.onFailure {
+            Log.w(TAG, "Direct Circle to Search session failed; trying navigation gesture", it)
+        }.getOrDefault(false)
+    }
 
     private companion object {
         const val TAG = "AssistantController"
