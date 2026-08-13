@@ -96,7 +96,7 @@ internal class ScreenOffKeyMonitorClient(
 
     private fun sendStart() {
         val message = Message.obtain(null, ScreenOffKeyMonitorProtocol.START).apply {
-            replyTo = callback
+            replyTo = this@ScreenOffKeyMonitorClient.callback
         }
         if (runCatching { remote?.send(message) }.isFailure) {
             remote = null
