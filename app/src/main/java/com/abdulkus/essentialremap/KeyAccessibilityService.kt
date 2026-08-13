@@ -175,7 +175,7 @@ class KeyAccessibilityService : AccessibilityService() {
     }
 
     private fun handleScreenOffKeyEvent(event: ScreenOffKeyEvent) {
-        if (!currentSettings.remappingEnabled || event.interactive) return
+        if (!currentSettings.remappingEnabled) return
         when (event.action) {
             ScreenOffKeyAction.DOWN -> {
                 beginGestureSequence(event.repeatCount)

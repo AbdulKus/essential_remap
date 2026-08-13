@@ -508,7 +508,7 @@ private fun ManualCommands(language: AppLanguage, copyText: (String) -> Unit) {
     val commands = "adb shell pm disable-user --user 0 com.nothing.ntessentialspace\n" +
         "adb shell pm disable-user --user 0 com.nothing.ntessentialrecorder\n" +
         "adb shell pm grant com.abdulkus.essentialremap android.permission.READ_LOGS\n" +
-        "adb shell settings put secure nt_block_essential_key 1"
+        "adb shell settings put secure nt_block_essential_key 0"
     var expanded by rememberSaveable { mutableStateOf(false) }
     TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
         Text(language.t("Manual ADB commands", "Команды ADB вручную"))

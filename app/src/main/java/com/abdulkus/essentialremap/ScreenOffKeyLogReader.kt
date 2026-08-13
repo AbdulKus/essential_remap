@@ -46,6 +46,7 @@ internal class ScreenOffKeyLogReader(
     private suspend fun readContinuously() {
         while (currentCoroutineContext().isActive) {
             val startedAtNanos = SystemClock.uptimeMillis() * NANOS_PER_MILLISECOND
+            val eventFilter = ScreenOffKeyEventFilter(startedAtNanos)
             var activeProcess: Process? = null
             try {
                 val launchedProcess = ProcessBuilder(LOGCAT_COMMAND)
@@ -57,7 +58,7 @@ internal class ScreenOffKeyLogReader(
                     while (currentCoroutineContext().isActive) {
                         val line = reader.readLine() ?: break
                         val event = ScreenOffKeyLogParser.parse(line) ?: continue
-                        if (!event.interactive && event.eventTimeNanos >= startedAtNanos) {
+                        if (eventFilter.accept(event)) {
                             onEvent(event)
                         }
                     }

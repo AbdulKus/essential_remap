@@ -286,7 +286,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
             "Command is not allowlisted"
         }
         val needsMarker = command == EssentialKeySetupCommands.GRANT_READ_LOGS ||
-            command == EssentialKeySetupCommands.BLOCK_SCREEN_OFF_WAKE
+            command == EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH
         return readShellOutput(manager, command) { output ->
             if (needsMarker) {
                 output.contains(EssentialKeySetupCommands.COMMAND_OK)
@@ -303,11 +303,11 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         val output = readShellOutput(
             manager,
             EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
-        ) { it.lineSequence().any { line -> line.trim() == "1" } }
-        if (output.lineSequence().none { it.trim() == "1" }) {
-            error("Android did not keep the Essential Key blocked from waking the display")
+        ) { it.lineSequence().any { line -> line.trim() == "0" } }
+        if (output.lineSequence().none { it.trim() == "0" }) {
+            error("Android did not enable reliable Essential Key wake dispatch")
         }
-        diagnostics.log("Screen-off access verified: READ_LOGS granted, nt_block_essential_key=1")
+        diagnostics.log("Screen-off access verified: READ_LOGS granted, nt_block_essential_key=0")
         return true
     }
 

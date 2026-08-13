@@ -36,7 +36,7 @@ class NothingPackageCommandsTest {
                 "pm disable-user --user 0 com.nothing.ntessentialspace",
                 "pm disable-user --user 0 com.nothing.ntessentialrecorder",
                 "pm grant com.abdulkus.essentialremap android.permission.READ_LOGS && echo essential-remap:ok",
-                "settings put secure nt_block_essential_key 1 && echo essential-remap:ok",
+                "settings put secure nt_block_essential_key 0 && echo essential-remap:ok",
             ),
             EssentialKeySetupCommands.commands(PackageOperation.DISABLE),
         )

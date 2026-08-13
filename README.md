@@ -34,7 +34,7 @@ The onboarding can pair with Android's local Wireless ADB service and run only t
 pm disable-user --user 0 com.nothing.ntessentialspace
 pm disable-user --user 0 com.nothing.ntessentialrecorder
 pm grant com.abdulkus.essentialremap android.permission.READ_LOGS
-settings put secure nt_block_essential_key 1
+settings put secure nt_block_essential_key 0
 ```
 
 No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
@@ -45,7 +45,7 @@ After the key is released, an `AccessibilityService` requests Android's key-even
 
 Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
 
-On the tested Nothing OS build, `nt_block_essential_key=1` keeps the display off but WindowManager still records the Essential Key's `ACTION_DOWN` and `ACTION_UP` entries. With the ADB-granted `READ_LOGS` development permission, Essential Remap starts a dedicated monitor process and a logcat reader filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. The separate process is important because Android applies the permission's supplemental `log` group only when a process starts. It does not store or transmit logs. The waiting reader holds no wake lock. After a real key-down arrives, the app takes a timeout-bound partial wake lock only long enough to classify and dispatch the action, then releases it.
+On the tested Nothing OS build, `nt_block_essential_key=0` lets Nothing OS wake the device long enough to dispatch a complete press reliably. WindowManager records `ACTION_DOWN` while the display is still non-interactive and can record the matching `ACTION_UP` after the display becomes interactive. Essential Remap pairs both halves by `downTime`, so the first physical press is classified instead of merely waking the display. With the ADB-granted `READ_LOGS` development permission, the app starts a dedicated monitor process and a logcat reader filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. It does not store or transmit logs, and the waiting reader holds no wake lock.
 
 Android may show a one-time system confirmation when the monitor first requests device-log access. Open Essential Remap once after a phone reboot so Android can display that confirmation and start the monitor while the app is visible.
 
