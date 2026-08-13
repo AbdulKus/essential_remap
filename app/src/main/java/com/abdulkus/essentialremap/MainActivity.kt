@@ -81,6 +81,14 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     },
+                    openDonate = {
+                        startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/AbdulKus/donate"),
+                            ),
+                        )
+                    },
                     beginPackageSetup = ::beginPackageSetup,
                     copyText = ::copyToClipboard,
                 )

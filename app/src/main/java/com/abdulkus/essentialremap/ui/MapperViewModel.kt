@@ -36,6 +36,7 @@ data class MapperUiState(
     val settings: AppSettings = AppSettings(),
     val draftHapticStrength: HapticStrength = HapticStrength.MEDIUM,
     val draftActions: Map<PressAction, ConfiguredAction> = AppSettings.defaultActions(),
+    val draftRunWhileLocked: Map<PressAction, Boolean> = AppSettings.defaultRunWhileLocked(),
     val serviceEnabled: Boolean = false,
     val competingServices: List<String> = emptyList(),
     val setup: EssentialKeySetupState = EssentialKeySetupState(),
@@ -49,7 +50,8 @@ data class MapperUiState(
 ) {
     val dirty: Boolean get() =
         draftHapticStrength != settings.hapticStrength ||
-            draftActions != settings.actions
+            draftActions != settings.actions ||
+            draftRunWhileLocked != settings.runWhileLocked
 
     val keyReleased: Boolean get() = setup.packageStatus == NothingPackageStatus.DISABLED
     val readyToMap: Boolean get() =
@@ -79,6 +81,11 @@ class MapperViewModel(
                         settings = settings,
                         draftHapticStrength = if (preserveDraft) current.draftHapticStrength else settings.hapticStrength,
                         draftActions = if (preserveDraft) current.draftActions else settings.actions,
+                        draftRunWhileLocked = if (preserveDraft) {
+                            current.draftRunWhileLocked
+                        } else {
+                            settings.runWhileLocked
+                        },
                         initialized = true,
                     )
                 }
@@ -183,6 +190,14 @@ class MapperViewModel(
         _uiState.update { it.copy(draftHapticStrength = strength) }
     }
 
+    fun updateRunWhileLocked(gesture: PressAction, enabled: Boolean) {
+        _uiState.update { current ->
+            current.copy(
+                draftRunWhileLocked = current.draftRunWhileLocked + (gesture to enabled),
+            )
+        }
+    }
+
     fun save() {
         val state = _uiState.value
         val baseUrlErrors = state.draftActions.mapNotNull { (gesture, action) ->
@@ -210,6 +225,7 @@ class MapperViewModel(
                 repository.saveConfiguration(
                     hapticStrength = _uiState.value.draftHapticStrength,
                     actions = _uiState.value.draftActions,
+                    runWhileLocked = _uiState.value.draftRunWhileLocked,
                 )
             }
                 .onSuccess { _messages.emit("Actions saved") }

@@ -43,11 +43,13 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
     override suspend fun saveConfiguration(
         hapticStrength: HapticStrength,
         actions: Map<PressAction, ConfiguredAction>,
+        runWhileLocked: Map<PressAction, Boolean>,
     ) {
         dataStore.edit { preferences ->
             preferences[Keys.COMMON_HAPTIC] = hapticStrength.name
             PressAction.entries.forEach { action ->
                 writeAction(preferences, action, actions.getValue(action))
+                preferences[Keys.runWhileLocked(action)] = runWhileLocked[action] == true
             }
         }
     }
@@ -130,6 +132,9 @@ internal fun preferencesToSettings(preferences: Preferences): AppSettings {
     val actions = PressAction.entries.associateWith { gesture ->
         readAction(preferences, gesture, defaults.getValue(gesture))
     }
+    val runWhileLocked = PressAction.entries.associateWith { gesture ->
+        preferences[Keys.runWhileLocked(gesture)] ?: false
+    }
     val results = PressAction.entries.associateWith { preferences[Keys.result(it)] }
     val commonHaptic = (
         preferences[Keys.COMMON_HAPTIC] ?: preferences[Keys.haptic(PressAction.SINGLE)]
@@ -138,6 +143,7 @@ internal fun preferencesToSettings(preferences: Preferences): AppSettings {
         mappedKey = mappedKey,
         hapticStrength = commonHaptic,
         actions = actions,
+        runWhileLocked = runWhileLocked,
         results = results,
         learning = preferences[Keys.LEARNING] ?: false,
     )
@@ -201,6 +207,7 @@ private object Keys {
     fun actionValue(action: PressAction) = stringPreferencesKey("${action.name}_action_value")
     fun actionLabel(action: PressAction) = stringPreferencesKey("${action.name}_action_label")
     fun actionBaseUrl(action: PressAction) = stringPreferencesKey("${action.name}_http_base_url")
+    fun runWhileLocked(action: PressAction) = booleanPreferencesKey("${action.name}_run_while_locked")
     fun method(action: PressAction) = stringPreferencesKey("${action.name}_method")
     fun url(action: PressAction) = stringPreferencesKey("${action.name}_url")
     fun haptic(action: PressAction) = stringPreferencesKey("${action.name}_haptic")

@@ -9,6 +9,5 @@
     android:description="@string/service_description"
     android:isAccessibilityTool="false"
     android:notificationTimeout="0"
-    android:packageNames="com.abdulkus.essentialremap"
     android:summary="@string/service_summary"
     android:settingsActivity="com.abdulkus.essentialremap.MainActivity" />

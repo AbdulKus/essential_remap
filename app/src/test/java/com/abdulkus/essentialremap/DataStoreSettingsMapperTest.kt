@@ -25,6 +25,7 @@ class DataStoreSettingsMapperTest {
             stringPreferencesKey("SINGLE_method") to "POST",
             stringPreferencesKey("SINGLE_url") to "http://192.168.1.5/hook",
             stringPreferencesKey("SINGLE_haptic") to "STRONG",
+            booleanPreferencesKey("DOUBLE_run_while_locked") to true,
             stringPreferencesKey("base_url") to "http://home-automation.local",
         )
 
@@ -35,6 +36,8 @@ class DataStoreSettingsMapperTest {
         assertEquals(RequestMethod.POST, single.method)
         assertEquals("http://home-automation.local", single.baseUrl)
         assertEquals(HapticStrength.STRONG, settings.hapticStrength)
+        assertEquals(true, settings.runWhileLocked.getValue(PressAction.DOUBLE))
+        assertEquals(false, settings.runWhileLocked.getValue(PressAction.SINGLE))
         assertEquals(
             ConfiguredAction.PerformSystemAction(SystemAction.CIRCLE_TO_SEARCH),
             settings.actions.getValue(PressAction.DOUBLE),

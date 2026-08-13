@@ -3,16 +3,19 @@ package com.abdulkus.essentialremap
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.graphics.Path
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import com.abdulkus.essentialremap.data.SettingsRepository
 import com.abdulkus.essentialremap.domain.AppSettings
+import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import java.time.Instant
@@ -27,8 +30,13 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var repository: SettingsRepository
     private lateinit var hapticEngine: HapticEngine
     private lateinit var classifier: GestureClassifier
+    private lateinit var keyguardManager: KeyguardManager
+    private lateinit var powerManager: PowerManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var actionExecutor: ActionExecutor
+    private var gestureSequenceActive = false
+    private var gestureStartedWhileLocked = false
+    private var activeWakeLock: PowerManager.WakeLock? = null
     @Volatile private var currentSettings = AppSettings()
 
     override fun onServiceConnected() {
@@ -36,6 +44,8 @@ class KeyAccessibilityService : AccessibilityService() {
         repository = container.repository
         hapticEngine = container.hapticEngine
         actionExecutor = ActionExecutor(this, container.torchController)
+        keyguardManager = getSystemService(KeyguardManager::class.java)
+        powerManager = getSystemService(PowerManager::class.java)
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
@@ -56,8 +66,14 @@ class KeyAccessibilityService : AccessibilityService() {
         if (event.scanCode != ESSENTIAL_KEY_SCAN_CODE) return false
 
         when (event.action) {
-            KeyEvent.ACTION_DOWN -> classifier.onKeyDown(event.repeatCount)
-            KeyEvent.ACTION_UP -> classifier.onKeyUp(event.isCanceled)
+            KeyEvent.ACTION_DOWN -> {
+                beginGestureSequence(event.repeatCount)
+                classifier.onKeyDown(event.repeatCount)
+            }
+            KeyEvent.ACTION_UP -> {
+                classifier.onKeyUp(event.isCanceled)
+                if (event.isCanceled) finishGestureSequence()
+            }
         }
         return true
     }
@@ -66,26 +82,77 @@ class KeyAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         if (::classifier.isInitialized) classifier.reset()
+        finishGestureSequence()
     }
 
     override fun onDestroy() {
         if (::classifier.isInitialized) classifier.reset()
+        finishGestureSequence()
         serviceScope.cancel()
         super.onDestroy()
     }
 
     private fun executeAction(action: PressAction) {
+        val startedWhileLocked = gestureStartedWhileLocked
+        val wakeLock = activeWakeLock
+        gestureSequenceActive = false
+        gestureStartedWhileLocked = false
+        activeWakeLock = null
+
+        if (!LockScreenExecutionPolicy.shouldRun(
+                action = action,
+                startedWhileLocked = startedWhileLocked,
+                runWhileLocked = currentSettings.runWhileLocked,
+            )
+        ) {
+            releaseWakeLock(wakeLock)
+            return
+        }
         val config = currentSettings.actions.getValue(action)
         hapticEngine.perform(currentSettings.hapticStrength)
         serviceScope.launch {
-            val result = actionExecutor.execute(
-                action = config,
-                performGlobalAction = ::performGlobalAction,
-                performNavigationHandleLongPress = ::performNavigationHandleLongPress,
-            )
-            val prefix = if (result.successful) "Done" else "Error"
-            repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
+            try {
+                val result = actionExecutor.execute(
+                    action = config,
+                    performGlobalAction = ::performGlobalAction,
+                    performNavigationHandleLongPress = ::performNavigationHandleLongPress,
+                )
+                val prefix = if (result.successful) "Done" else "Error"
+                repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
+            } finally {
+                releaseWakeLock(wakeLock)
+            }
         }
+    }
+
+    private fun beginGestureSequence(repeatCount: Int) {
+        if (repeatCount != 0 || gestureSequenceActive) return
+        gestureSequenceActive = true
+        gestureStartedWhileLocked =
+            !powerManager.isInteractive || keyguardManager.isKeyguardLocked
+
+        // The key event itself wakes the input pipeline. Keep only the CPU alive long enough to
+        // classify the user's press and dispatch the selected action, never while idle.
+        if (!powerManager.isInteractive && currentSettings.runWhileLocked.values.any { it }) {
+            activeWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                WAKE_LOCK_TAG,
+            ).apply {
+                setReferenceCounted(false)
+                acquire(WAKE_LOCK_TIMEOUT_MS)
+            }
+        }
+    }
+
+    private fun finishGestureSequence() {
+        gestureSequenceActive = false
+        gestureStartedWhileLocked = false
+        releaseWakeLock(activeWakeLock)
+        activeWakeLock = null
+    }
+
+    private fun releaseWakeLock(wakeLock: PowerManager.WakeLock?) {
+        if (wakeLock?.isHeld == true) runCatching { wakeLock.release() }
     }
 
     /**
@@ -130,6 +197,8 @@ class KeyAccessibilityService : AccessibilityService() {
     private companion object {
         const val ESSENTIAL_KEY_SCAN_CODE = 250
         const val NAVIGATION_LONG_PRESS_MS = 700L
+        const val WAKE_LOCK_TIMEOUT_MS = 5_000L
+        const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
     }
 
     private class HandlerScheduler(private val handler: Handler) : GestureClassifier.Scheduler {

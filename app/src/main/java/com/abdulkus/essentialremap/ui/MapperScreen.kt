@@ -39,6 +39,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -97,6 +98,7 @@ fun EssentialRemapApp(
     openDeveloperOptions: () -> Unit,
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
+    openDonate: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     copyText: (String) -> Unit,
 ) {
@@ -147,6 +149,7 @@ fun EssentialRemapApp(
         openDeveloperOptions = openDeveloperOptions,
         openAssistantSettings = openAssistantSettings,
         openAppInfo = openAppInfo,
+        openDonate = openDonate,
         beginPackageSetup = beginPackageSetup,
         submitPairingCode = viewModel::submitPairingCode,
         cancelPackageSetup = viewModel::cancelPackageSetup,
@@ -158,6 +161,7 @@ fun EssentialRemapApp(
         updateSoundMode = viewModel::updateSoundMode,
         updateSystemAction = viewModel::updateSystemAction,
         updateLaunchApp = viewModel::updateLaunchApp,
+        updateRunWhileLocked = viewModel::updateRunWhileLocked,
         updateHaptic = viewModel::updateHaptic,
         previewHaptic = viewModel::previewHaptic,
         save = viewModel::save,
@@ -501,6 +505,7 @@ private fun HomeScreen(
     openDeveloperOptions: () -> Unit,
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
+    openDonate: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
@@ -512,6 +517,7 @@ private fun HomeScreen(
     updateSoundMode: (PressAction, SoundMode) -> Unit,
     updateSystemAction: (PressAction, SystemAction) -> Unit,
     updateLaunchApp: (PressAction, LaunchableApp) -> Unit,
+    updateRunWhileLocked: (PressAction, Boolean) -> Unit,
     updateHaptic: (HapticStrength) -> Unit,
     previewHaptic: (HapticStrength) -> Unit,
     save: () -> Unit,
@@ -555,7 +561,7 @@ private fun HomeScreen(
                     Column(Modifier.padding(start = 12.dp).weight(1f)) {
                         Text("ESSENTIAL REMAP", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(
-                            if (ready) language.t("ACTIVE · SCAN 250", "АКТИВНО · SCAN 250")
+                            if (ready) language.t("ACTIVE", "АКТИВНО")
                             else language.t("SETUP REQUIRED", "НУЖНА НАСТРОЙКА"),
                             color = if (ready) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.labelSmall,
@@ -581,7 +587,9 @@ private fun HomeScreen(
                     language = language,
                     gesture = gesture,
                     action = state.draftActions.getValue(gesture),
+                    runWhileLocked = state.draftRunWhileLocked[gesture] == true,
                     onClick = { actionGesture = gesture },
+                    onRunWhileLockedChanged = { updateRunWhileLocked(gesture, it) },
                 )
             }
             item {
@@ -660,6 +668,7 @@ private fun HomeScreen(
             openDeveloperOptions,
             openAssistantSettings,
             openAppInfo,
+            openDonate,
             beginPackageSetup,
             submitPairingCode,
             cancelPackageSetup,
@@ -671,23 +680,56 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun GestureCard(language: AppLanguage, gesture: PressAction, action: ConfiguredAction, onClick: () -> Unit) {
+private fun GestureCard(
+    language: AppLanguage,
+    gesture: PressAction,
+    action: ConfiguredAction,
+    runWhileLocked: Boolean,
+    onClick: () -> Unit,
+    onRunWhileLockedChanged: (Boolean) -> Unit,
+) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(color = Color.Black, shape = CircleShape, modifier = Modifier.size(50.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(gesture.glyph(), color = Color.White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onClick).padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(color = Color.Black, shape = CircleShape, modifier = Modifier.size(50.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(gesture.glyph(), color = Color.White, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
                 }
+                Column(Modifier.padding(start = 14.dp).weight(1f)) {
+                    Text(gesture.title(language), fontWeight = FontWeight.SemiBold)
+                    Text(action.summary(language), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                }
+                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
             }
-            Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                Text(gesture.title(language), fontWeight = FontWeight.SemiBold)
-                Text(action.summary(language), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 18.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onRunWhileLockedChanged(!runWhileLocked) }
+                    .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        language.t("Run while locked", "Работать на блокировке"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        language.t("Includes screen off", "Включая погашенный экран"),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Checkbox(checked = runWhileLocked, onCheckedChange = null)
             }
-            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
         }
     }
 }
@@ -921,6 +963,7 @@ private fun SettingsDialog(
     openDeveloperOptions: () -> Unit,
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
+    openDonate: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
@@ -984,6 +1027,7 @@ private fun SettingsDialog(
                         "Restore Essential Space before uninstalling. Removing this app alone does not re-enable Nothing's packages.",
                         "Перед удалением верните Essential Space. Удаление приложения само по себе не включит пакеты Nothing.",
                     ))
+                    SettingsRow("Donate", "github.com/AbdulKus/donate", openDonate)
                     Spacer(Modifier.height(12.dp))
                 }
             }

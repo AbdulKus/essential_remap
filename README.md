@@ -15,6 +15,7 @@ The app is designed for Nothing OS and includes Russian and English interfaces.
 - Normal, vibrate, silent, and silent/normal toggle.
 - Open URLs/deep links and send GET/POST webhooks.
 - Four haptic strengths.
+- Per-gesture lock-screen and screen-off execution.
 - Built-in, reversible Wireless ADB setup; no PC or root is required.
 
 ## How it works
@@ -36,6 +37,12 @@ pm disable-user --user 0 com.nothing.ntessentialrecorder
 No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
 
 After the key is released, an `AccessibilityService` requests Android's key-event filter and consumes only events whose scan code is `250`. It does not retrieve window content, inspect the screen, type text, or collect accessibility data. Android documents this API as receiving key events before the rest of the system and allowing a handled event to be consumed. Gesture capability is used only as a fallback to reproduce a long press on the bottom navigation handle when Circle to Search is explicitly assigned and triggered.
+
+## Lock screen and sleep
+
+Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI. If the display is off, the app takes a timeout-bound partial wake lock only after the physical key event arrives, then releases it immediately after classifying and dispatching the action. It never keeps the CPU awake while waiting for a press.
+
+Android can deliver a key from hardware suspend only when the device key layout or firmware marks that internal key as wake-capable. A regular app cannot add that system `WAKE` flag. If a Nothing OS build does not deliver scan code `250` from deep sleep, lock-screen execution still works while the display is on, but true screen-off wake requires a rooted/system key-layout change.
 
 ## Circle to Search
 

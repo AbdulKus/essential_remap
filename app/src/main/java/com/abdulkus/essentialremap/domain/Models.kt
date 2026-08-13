@@ -133,6 +133,7 @@ data class AppSettings(
     val mappedKey: KeyIdentity? = null,
     val hapticStrength: HapticStrength = HapticStrength.MEDIUM,
     val actions: Map<PressAction, ConfiguredAction> = defaultActions(),
+    val runWhileLocked: Map<PressAction, Boolean> = defaultRunWhileLocked(),
     val results: Map<PressAction, String?> = PressAction.entries.associateWith { null },
     val learning: Boolean = false,
 ) {
@@ -143,7 +144,18 @@ data class AppSettings(
                 PressAction.DOUBLE to ConfiguredAction.PerformSystemAction(SystemAction.CIRCLE_TO_SEARCH),
                 PressAction.LONG to ConfiguredAction.Flashlight,
             )
+
+        fun defaultRunWhileLocked(): Map<PressAction, Boolean> =
+            PressAction.entries.associateWith { false }
     }
+}
+
+object LockScreenExecutionPolicy {
+    fun shouldRun(
+        action: PressAction,
+        startedWhileLocked: Boolean,
+        runWhileLocked: Map<PressAction, Boolean>,
+    ): Boolean = !startedWhileLocked || runWhileLocked[action] == true
 }
 
 object ActionUrlResolver {

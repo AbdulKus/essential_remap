@@ -130,6 +130,24 @@ class MapperViewModelTest {
     }
 
     @Test
+    fun lockScreenOptionRemainsDraftUntilSave() = runTest(dispatcher) {
+        val repository = FakeRepository()
+        val viewModel = MapperViewModel(repository, FakeHapticEngine(), FakeSetup())
+        advanceUntilIdle()
+
+        viewModel.updateRunWhileLocked(PressAction.DOUBLE, true)
+
+        assertTrue(viewModel.uiState.value.dirty)
+        assertFalse(repository.state.value.runWhileLocked.getValue(PressAction.DOUBLE))
+
+        viewModel.save()
+        advanceUntilIdle()
+
+        assertTrue(repository.state.value.runWhileLocked.getValue(PressAction.DOUBLE))
+        assertFalse(viewModel.uiState.value.dirty)
+    }
+
+    @Test
     fun keyDetectionRequiresReleasedPackageAndAccessibility() = runTest(dispatcher) {
         val setup = FakeSetup()
         val viewModel = MapperViewModel(FakeRepository(), FakeHapticEngine(), setup)
@@ -159,10 +177,12 @@ class MapperViewModelTest {
         override suspend fun saveConfiguration(
             hapticStrength: HapticStrength,
             actions: Map<PressAction, ConfiguredAction>,
+            runWhileLocked: Map<PressAction, Boolean>,
         ) {
             state.value = state.value.copy(
                 hapticStrength = hapticStrength,
                 actions = actions,
+                runWhileLocked = runWhileLocked,
             )
         }
 
