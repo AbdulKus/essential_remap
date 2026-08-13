@@ -21,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      RELEASE_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 || secrets.ANDROID_KEYSTORE_BASE64 }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
-      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
-      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 || secrets.SIGNING_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 || secrets.ANDROID_KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD || secrets.SIGNING_STORE_PASSWORD || secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || secrets.SIGNING_KEY_ALIAS || secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD || secrets.SIGNING_KEY_PASSWORD || secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Check out source
@@ -52,14 +52,30 @@ jobs:
                 -n "$SIGNING_STORE_PASSWORD" && \
                 -n "$SIGNING_KEY_ALIAS" && \
                 -n "$SIGNING_KEY_PASSWORD" ]]; then
-            signing_file="$RUNNER_TEMP/essential-remap-release.jks"
+            signing_file="$RUNNER_TEMP/essential-remap-release.keystore"
             printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$signing_file"
             chmod 600 "$signing_file"
+            if keytool -list \
+                -keystore "$signing_file" \
+                -storetype PKCS12 \
+                -storepass "$SIGNING_STORE_PASSWORD" \
+                -alias "$SIGNING_KEY_ALIAS" > /dev/null 2>&1; then
+              echo "SIGNING_STORE_TYPE=PKCS12" >> "$GITHUB_ENV"
+            elif keytool -list \
+                -keystore "$signing_file" \
+                -storetype JKS \
+                -storepass "$SIGNING_STORE_PASSWORD" \
+                -alias "$SIGNING_KEY_ALIAS" > /dev/null 2>&1; then
+              echo "SIGNING_STORE_TYPE=JKS" >> "$GITHUB_ENV"
+            else
+              echo "::error::The release keystore, password or alias is invalid."
+              exit 1
+            fi
             echo "SIGNING_STORE_FILE=$signing_file" >> "$GITHUB_ENV"
           elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             echo "Signing secrets are unavailable for this pull request; using the repository test key."
           else
-            echo "::error::Release signing secrets are incomplete. Add SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD."
+            echo "::error::Release signing secrets are incomplete. Add RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS and RELEASE_KEY_PASSWORD."
             exit 1
           fi
 

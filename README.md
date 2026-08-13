@@ -80,12 +80,12 @@ Every push to `main` builds debug and release APKs. The first successful build f
 
 Release signing uses these GitHub Actions Secrets:
 
-- `SIGNING_KEYSTORE_BASE64` — the entire JKS or PKCS12 file encoded as base64
-- `SIGNING_STORE_PASSWORD`
-- `SIGNING_KEY_ALIAS`
-- `SIGNING_KEY_PASSWORD`
+- `RELEASE_KEYSTORE_BASE64` — the entire JKS or PKCS12 file encoded as base64
+- `RELEASE_KEYSTORE_PASSWORD`
+- `RELEASE_KEY_ALIAS`
+- `RELEASE_KEY_PASSWORD`
 
-The workflow also accepts the shorter aliases `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD`. Pull requests without secret access use the repository test key only for CI validation.
+These are the same names used by `nothing_matrix_apps`. The workflow also accepts `SIGNING_*`, `KEYSTORE_*`/`KEY_*`, and `ANDROID_*` aliases. Pull requests without secret access use the repository test key only for CI validation.
 
 ## Privacy
 

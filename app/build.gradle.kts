@@ -26,6 +26,7 @@ android {
                 storePassword = System.getenv("SIGNING_STORE_PASSWORD")
                 keyAlias = System.getenv("SIGNING_KEY_ALIAS")
                 keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+                storeType = System.getenv("SIGNING_STORE_TYPE")
             } else {
                 // Public development key keeps GitHub test releases update-compatible. Production
                 // distributors should inject a private keystore through the environment variables.
