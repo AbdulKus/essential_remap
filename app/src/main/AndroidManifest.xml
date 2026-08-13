@@ -66,6 +66,11 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <service
+            android:name=".ScreenOffKeyMonitorService"
+            android:exported="false"
+            android:process=":key_monitor" />
+
         <receiver
             android:name=".setup.PairingCodeReceiver"
             android:exported="false" />

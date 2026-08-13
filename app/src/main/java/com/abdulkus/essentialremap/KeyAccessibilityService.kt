@@ -32,7 +32,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var repository: SettingsRepository
     private lateinit var hapticEngine: HapticEngine
     private lateinit var classifier: GestureClassifier
-    private lateinit var screenOffKeyLogReader: ScreenOffKeyLogReader
+    private lateinit var screenOffKeyMonitor: ScreenOffKeyMonitorClient
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -58,7 +58,7 @@ class KeyAccessibilityService : AccessibilityService() {
             onAction = ::executeAction,
             longPressMs = LONG_PRESS_MS,
         )
-        screenOffKeyLogReader = ScreenOffKeyLogReader { event ->
+        screenOffKeyMonitor = ScreenOffKeyMonitorClient(this) { event ->
             mainHandler.post { handleScreenOffKeyEvent(event) }
         }
         serviceScope.launch {
@@ -104,7 +104,7 @@ class KeyAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (::classifier.isInitialized) classifier.reset()
-        if (::screenOffKeyLogReader.isInitialized) screenOffKeyLogReader.close()
+        if (::screenOffKeyMonitor.isInitialized) screenOffKeyMonitor.close()
         finishGestureSequence()
         serviceScope.cancel()
         super.onDestroy()
@@ -186,11 +186,11 @@ class KeyAccessibilityService : AccessibilityService() {
     }
 
     private fun applyRuntimeState() {
-        if (!::classifier.isInitialized || !::screenOffKeyLogReader.isInitialized) return
+        if (!::classifier.isInitialized || !::screenOffKeyMonitor.isInitialized) return
         if (shouldReadScreenOffKey()) {
-            screenOffKeyLogReader.start()
+            screenOffKeyMonitor.start()
         } else {
-            screenOffKeyLogReader.stop()
+            screenOffKeyMonitor.stop()
             classifier.reset()
             finishGestureSequence()
         }
@@ -199,6 +199,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private fun shouldReadScreenOffKey(): Boolean =
         currentSettings.remappingEnabled &&
             ScreenOffKeyAccess.isGranted(this) &&
+            ScreenOffKeyAccess.canStartMonitor() &&
             PressAction.entries.any { action ->
                 currentSettings.runWhileLocked[action] == true &&
                     currentSettings.actions[action] != ConfiguredAction.None

@@ -633,17 +633,6 @@ private fun HomeScreen(
                 Spacer(Modifier.height(8.dp))
                 HapticCard(language, state.draftHapticStrength, updateHaptic, previewHaptic)
             }
-            item {
-                Text(
-                    language.t(
-                        "Single press waits 300 ms to distinguish a double press. Hold activates after 500 ms.",
-                        "Одиночное нажатие ждёт 300 мс, чтобы отличить двойное. Удержание срабатывает через 500 мс.",
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                )
-            }
         }
     }
 
@@ -702,7 +691,6 @@ private fun HomeScreen(
             dismiss = { settingsOpen = false },
             openAccessibilitySettings,
             openNotificationPolicySettings,
-            openDeveloperOptions,
             openAssistantSettings,
             openAppInfo,
             openDonate,
@@ -998,7 +986,6 @@ private fun SettingsDialog(
     dismiss: () -> Unit,
     openAccessibilitySettings: () -> Unit,
     openNotificationPolicySettings: () -> Unit,
-    openDeveloperOptions: () -> Unit,
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
@@ -1058,10 +1045,19 @@ private fun SettingsDialog(
                             }
                         }
                     }
-                    TextButton(onClick = openDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
-                        Text("WIRELESS ADB")
-                    }
                     ManualCommands(language, copyText)
+                    HorizontalDivider()
+                    SectionLabel(language.t("BUTTON", "КНОПКА"))
+                    SettingsSwitchRow(
+                        title = language.t("Handle Essential Key", "Обрабатывать Essential Key"),
+                        subtitle = if (state.settings.remappingEnabled) {
+                            language.t("Configured actions are active", "Назначенные действия выполняются")
+                        } else {
+                            language.t("Button actions are paused", "Действия кнопки приостановлены")
+                        },
+                        checked = state.settings.remappingEnabled,
+                        onCheckedChange = setRemappingEnabled,
+                    )
                     HorizontalDivider()
                     SectionLabel(language.t("PERMISSIONS", "РАЗРЕШЕНИЯ"))
                     SettingsRow(
@@ -1079,16 +1075,6 @@ private fun SettingsDialog(
                     }
                     HorizontalDivider()
                     SectionLabel(language.t("APP", "ПРИЛОЖЕНИЕ"))
-                    SettingsSwitchRow(
-                        title = language.t("Remapping", "Переназначение кнопки"),
-                        subtitle = if (state.settings.remappingEnabled) {
-                            language.t("Enabled", "Включено")
-                        } else {
-                            language.t("Paused", "Приостановлено")
-                        },
-                        checked = state.settings.remappingEnabled,
-                        onCheckedChange = setRemappingEnabled,
-                    )
                     SettingsRow(language.t("Run setup again", "Повторить первоначальную настройку"), null) { dismiss(); runSetupAgain() }
                     SettingsRow(language.t("Android app info", "Информация о приложении"), null, openAppInfo)
                     WarningCard(language.t(

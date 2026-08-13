@@ -45,7 +45,9 @@ After the key is released, an `AccessibilityService` requests Android's key-even
 
 Each press type has a **Run while locked** option. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
 
-On the tested Nothing OS build, `nt_block_essential_key=1` keeps the display off but WindowManager still records the Essential Key's `ACTION_DOWN` and `ACTION_UP` entries. With the ADB-granted `READ_LOGS` development permission, Essential Remap starts a logcat process filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. It does not store or transmit logs. The waiting reader holds no wake lock. After a real key-down arrives, the app takes a timeout-bound partial wake lock only long enough to classify and dispatch the action, then releases it.
+On the tested Nothing OS build, `nt_block_essential_key=1` keeps the display off but WindowManager still records the Essential Key's `ACTION_DOWN` and `ACTION_UP` entries. With the ADB-granted `READ_LOGS` development permission, Essential Remap starts a dedicated monitor process and a logcat reader filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. The separate process is important because Android applies the permission's supplemental `log` group only when a process starts. It does not store or transmit logs. The waiting reader holds no wake lock. After a real key-down arrives, the app takes a timeout-bound partial wake lock only long enough to classify and dispatch the action, then releases it.
+
+Android may show a one-time system confirmation when the monitor first requests device-log access. Open Essential Remap once after a phone reboot so Android can display that confirmation and start the monitor while the app is visible.
 
 The screen-off bridge runs only when remapping is enabled and at least one configured action is allowed while locked. It is firmware-specific: a future Nothing OS update could remove or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
 

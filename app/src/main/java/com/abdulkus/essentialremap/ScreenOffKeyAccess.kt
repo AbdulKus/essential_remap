@@ -11,6 +11,7 @@ object ScreenOffKeyAccess {
 
     private val mutableChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes: SharedFlow<Unit> = mutableChanges.asSharedFlow()
+    @Volatile private var monitorStartAllowed = false
 
     fun isGranted(context: Context): Boolean =
         context.checkSelfPermission(READ_LOGS_PERMISSION) == PackageManager.PERMISSION_GRANTED
@@ -18,6 +19,17 @@ object ScreenOffKeyAccess {
     fun notifyChanged() {
         mutableChanges.tryEmit(Unit)
     }
+
+    /**
+     * Android adds READ_LOGS' supplemental `log` group only when a process is forked. Waiting for
+     * the activity also makes Android's one-time log-access confirmation eligible to be shown.
+     */
+    fun allowMonitorStart() {
+        monitorStartAllowed = true
+        notifyChanged()
+    }
+
+    fun canStartMonitor(): Boolean = monitorStartAllowed
 
     private const val READ_LOGS_PERMISSION = "android.permission.READ_LOGS"
 }
