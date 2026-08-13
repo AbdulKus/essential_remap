@@ -37,7 +37,7 @@ class NothingPackageCommandsTest {
                 "pm disable-user --user 0 com.nothing.ntessentialspace",
                 "pm disable-user --user 0 com.nothing.ntessentialrecorder",
                 "settings put secure nt_block_essential_key 0 && echo essential-remap:ok",
-                ShellKeyMonitorCommands.installAndStart,
+                ShellKeyMonitorCommands.INSTALL,
             ),
             EssentialKeySetupCommands.commands(PackageOperation.DISABLE),
         )
@@ -46,7 +46,7 @@ class NothingPackageCommandsTest {
     @Test
     fun arbitraryShellCommandsAreRejectedByAllowlist() {
         assertEquals(false, EssentialKeySetupCommands.isAllowlisted("settings list secure"))
-        assertEquals(true, EssentialKeySetupCommands.isAllowlisted(ShellKeyMonitorCommands.installAndStart))
+        assertEquals(true, EssentialKeySetupCommands.isAllowlisted(ShellKeyMonitorCommands.INSTALL))
     }
 
     @Test
