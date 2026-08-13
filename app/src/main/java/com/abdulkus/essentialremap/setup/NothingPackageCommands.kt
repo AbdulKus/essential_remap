@@ -30,7 +30,7 @@ object EssentialKeySetupCommands {
             PackageOperation.DISABLE -> {
                 addAll(NothingPackageCommands.commands(operation))
                 add(ENABLE_RELIABLE_SCREEN_OFF_DISPATCH)
-                add(ShellKeyMonitorCommands.installAndStart)
+                add(ShellKeyMonitorCommands.INSTALL)
             }
             PackageOperation.RESTORE -> {
                 add(ShellKeyMonitorCommands.stop)

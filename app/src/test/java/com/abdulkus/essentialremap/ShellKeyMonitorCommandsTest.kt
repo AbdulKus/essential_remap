@@ -26,4 +26,14 @@ class ShellKeyMonitorCommandsTest {
         assertTrue(script.contains("key-monitor.pid"))
         assertTrue(script.contains("kill -0"))
     }
+
+    @Test
+    fun installerStreamsPayloadThroughAHereDocument() {
+        val installer = ShellKeyMonitorCommands.installSessionScript
+
+        assertTrue(installer.contains("ESSENTIAL_REMAP_MONITOR_EOF"))
+        assertTrue(installer.contains("/system/bin/base64 -d"))
+        assertTrue(installer.endsWith("exit\n"))
+        assertTrue(ShellKeyMonitorCommands.INSTALL.length < 100)
+    }
 }

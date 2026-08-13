@@ -8,6 +8,7 @@ import java.util.Base64
  * normal app may open a new full-device logcat stream only while its activity is on top.
  */
 object ShellKeyMonitorCommands {
+    const val INSTALL = "essential-remap-internal:install-shell-monitor"
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
@@ -119,7 +120,13 @@ object ShellKeyMonitorCommands {
             monitor_pid=${'$'}!
             echo "${'$'}monitor_pid" > "${'$'}PID_FILE"
             /system/bin/sleep 1
-            if monitor_is_running; then echo $START_OK; else exit 1; fi
+            if monitor_is_running; then
+              echo $START_OK
+            else
+              echo essential-remap:shell-monitor-failed
+              [ -r "${'$'}LOG_FILE" ] && /system/bin/tail -n 20 "${'$'}LOG_FILE"
+              exit 1
+            fi
             ;;
           stop)
             stop_monitor
@@ -138,6 +145,20 @@ object ShellKeyMonitorCommands {
     private val encodedScript: String = Base64.getEncoder().encodeToString(
         monitorScript.toByteArray(Charsets.UTF_8),
     )
+
+    /**
+     * Sent through an interactive shell's stdin. Keeping the Base64 payload out of the ADB service
+     * destination avoids the much smaller destination/command length limit on some adbd builds.
+     */
+    val installSessionScript: String = """
+        /system/bin/mkdir -p $DIRECTORY || exit 1
+        if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi
+        /system/bin/base64 -d > $SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'
+        $encodedScript
+        ESSENTIAL_REMAP_MONITOR_EOF
+        /system/bin/chmod 700 $SCRIPT && /system/bin/sh $SCRIPT start
+        exit
+    """.trimIndent() + "\n"
 
     val installAndStart: String =
         "mkdir -p $DIRECTORY || exit 1; " +

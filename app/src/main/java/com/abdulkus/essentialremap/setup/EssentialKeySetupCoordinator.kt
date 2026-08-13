@@ -16,6 +16,7 @@ import androidx.core.app.RemoteInput
 import com.abdulkus.essentialremap.MainActivity
 import com.abdulkus.essentialremap.R
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
+import io.github.muntashirakon.adb.AdbStream
 import io.github.muntashirakon.adb.android.AdbMdns
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -290,17 +291,39 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         require(EssentialKeySetupCommands.isAllowlisted(command)) {
             "Command is not allowlisted"
         }
+        if (command == ShellKeyMonitorCommands.INSTALL) {
+            return executeMonitorInstall(manager)
+        }
         return readShellOutput(manager, command) { output ->
             when (command) {
                 EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH ->
                     output.contains(EssentialKeySetupCommands.COMMAND_OK)
-                ShellKeyMonitorCommands.installAndStart ->
-                    output.contains(ShellKeyMonitorCommands.START_OK)
                 ShellKeyMonitorCommands.stop ->
                     output.contains(ShellKeyMonitorCommands.STOP_OK)
                 else -> output.contains("new state:", ignoreCase = true)
             }
         }.trim()
+    }
+
+    private fun executeMonitorInstall(manager: LocalAdbConnectionManager): String {
+        val stream = manager.openStream("shell:/system/bin/sh")
+        try {
+            val payload = ShellKeyMonitorCommands.installSessionScript.toByteArray(StandardCharsets.UTF_8)
+            val output = stream.openOutputStream()
+            var offset = 0
+            while (offset < payload.size) {
+                val count = minOf(SHELL_WRITE_CHUNK_BYTES, payload.size - offset)
+                output.write(payload, offset, count)
+                offset += count
+            }
+            output.flush()
+            return collectShellOutput(
+                stream = stream,
+                description = "install shell key monitor",
+            ) { it.contains(ShellKeyMonitorCommands.START_OK) }.trim()
+        } finally {
+            runCatching { stream.close() }
+        }
     }
 
     private fun verifyScreenOffAccess(manager: LocalAdbConnectionManager): Boolean {
@@ -425,38 +448,48 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         command: String,
         complete: (String) -> Boolean,
     ): String {
-        val output = StringBuilder()
         val stream = manager.openStream("shell:$command")
-        val deadline = SystemClock.elapsedRealtime() + COMMAND_TIMEOUT_MS
-        try {
-            val input = stream.openInputStream()
-            val buffer = ByteArray(2048)
-            while (SystemClock.elapsedRealtime() < deadline) {
-                val available = try {
-                    input.available()
-                } catch (error: IOException) {
-                    if (stream.isClosed) break else throw error
-                }
-                if (available > 0) {
-                    val count = input.read(buffer, 0, minOf(buffer.size, available))
-                    if (count > 0) {
-                        output.append(String(buffer, 0, count, StandardCharsets.UTF_8))
-                        if (complete(output.toString())) return output.toString()
-                    }
-                } else if (stream.isClosed) {
-                    break
-                } else {
-                    Thread.sleep(SHELL_POLL_INTERVAL_MS)
-                }
-            }
+        return try {
+            collectShellOutput(stream, command, complete)
         } finally {
             runCatching { stream.close() }
         }
+    }
+
+    private fun collectShellOutput(
+        stream: AdbStream,
+        description: String,
+        complete: (String) -> Boolean,
+    ): String {
+        val output = StringBuilder()
+        val deadline = SystemClock.elapsedRealtime() + COMMAND_TIMEOUT_MS
+        val input = stream.openInputStream()
+        val buffer = ByteArray(2048)
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val available = try {
+                input.available()
+            } catch (error: IOException) {
+                if (stream.isClosed) break else throw error
+            }
+            if (available > 0) {
+                val count = input.read(buffer, 0, minOf(buffer.size, available))
+                if (count > 0) {
+                    output.append(String(buffer, 0, count, StandardCharsets.UTF_8))
+                    if (complete(output.toString())) return output.toString()
+                }
+            } else if (stream.isClosed) {
+                break
+            } else {
+                Thread.sleep(SHELL_POLL_INTERVAL_MS)
+            }
+        }
         if (!complete(output.toString())) {
             diagnostics.log(
-                "Shell command timed out: command=$command output=${output.toString().take(MAX_LOG_OUTPUT_CHARS)}",
+                "Shell step did not confirm success: step=$description " +
+                    "output=${output.toString().take(MAX_LOG_OUTPUT_CHARS)}",
             )
-            error(output.toString().ifBlank { "ADB command timed out without confirmation" })
+            val details = output.toString().trim().ifBlank { "no command output" }
+            error("ADB step failed: $description. $details")
         }
         return output.toString()
     }
@@ -606,6 +639,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         private const val LOOPBACK_HOST = "127.0.0.1"
         private const val COMMAND_TIMEOUT_MS = 15_000L
         private const val SHELL_POLL_INTERVAL_MS = 25L
+        private const val SHELL_WRITE_CHUNK_BYTES = 1_024
         private const val MAX_LOG_OUTPUT_CHARS = 2_000
     }
 }
