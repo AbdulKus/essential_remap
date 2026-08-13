@@ -33,8 +33,8 @@ The onboarding can pair with Android's local Wireless ADB service and run only t
 ```sh
 pm disable-user --user 0 com.nothing.ntessentialspace
 pm disable-user --user 0 com.nothing.ntessentialrecorder
-pm grant com.abdulkus.essentialremap android.permission.READ_LOGS
 settings put secure nt_block_essential_key 0
+# The built-in setup also installs and starts the narrowly filtered shell monitor.
 ```
 
 No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
@@ -45,11 +45,13 @@ After the key is released, an `AccessibilityService` requests Android's key-even
 
 Each press type has a **Run while locked** option. **Turn screen off again** can also be enabled per press type. It calls Android's lock-screen global action after the configured action only when that same press began with the display non-interactive; presses made while the display was already on are unaffected. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
 
-On the tested Nothing OS build, `nt_block_essential_key=0` lets Nothing OS wake the device long enough to dispatch a complete press reliably. WindowManager records `ACTION_DOWN` while the display is still non-interactive and can record the matching `ACTION_UP` after the display becomes interactive. Essential Remap pairs both halves by `downTime`, so the first physical press is classified instead of merely waking the display. With the ADB-granted `READ_LOGS` development permission, the app starts a dedicated monitor process and a logcat reader filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`. It does not store or transmit logs, and the waiting reader holds no wake lock.
+On the tested Nothing OS build, `nt_block_essential_key=0` lets Nothing OS wake the device long enough to dispatch a complete press reliably. WindowManager records `ACTION_DOWN` while the display is still non-interactive and can record the matching `ACTION_UP` after the display becomes interactive. Essential Remap pairs both halves by `downTime`, so the first physical press is classified instead of merely waking the display.
 
-Android may show a one-time system confirmation when the monitor first requests device-log access. Open Essential Remap once after a phone reboot so Android can display that confirmation and start the monitor while the app is visible.
+Android 13 and newer do not reliably allow a background app to reopen a full-device logcat stream. The built-in Wireless ADB setup therefore starts a small monitor under Android's non-root `shell` UID. It blocks on a logcat stream filtered to `WindowManager` messages containing `interceptKeyBeforeQueueing` and `scanCode=250`, then sends an explicit permission-protected event to Essential Remap. It does not store or transmit logs. The waiting process uses no wake lock and consumes CPU only when matching key messages arrive. The accessibility side deduplicates the same physical event if Android also delivers it normally.
 
-The screen-off bridge runs only when remapping is enabled and at least one configured action is allowed while locked. It is firmware-specific: a future Nothing OS update could remove or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
+The shell process naturally stops when the phone reboots. Essential Remap detects the changed Android boot count, marks sleep handling as needing setup, and can start the monitor again through the same Wireless ADB flow. No root or always-on CPU wake lock is used.
+
+The screen-off bridge is firmware-specific: a future Nothing OS update could remove or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
 
 ## Circle to Search
 
@@ -89,7 +91,7 @@ These are the same names used by `nothing_matrix_apps`. The workflow also accept
 
 ## Privacy
 
-All settings stay on the device. Internet permission exists only for user-configured HTTP actions. Wireless ADB credentials are generated and stored locally by Android's app storage. `READ_LOGS` is used only by the on-device, narrowly filtered Essential Key reader; log contents are not saved or transmitted. No analytics or telemetry is included.
+All settings stay on the device. Internet permission exists only for user-configured HTTP actions. Wireless ADB credentials are generated and stored locally by Android's app storage. The shell monitor reads only the filtered Essential Key WindowManager stream; log contents are not saved or transmitted. The protected receiver accepts monitor events only from Android's shell UID. No analytics or telemetry is included.
 
 ## License and attribution
 

@@ -89,6 +89,7 @@ import com.abdulkus.essentialremap.platform.LaunchableApp
 import com.abdulkus.essentialremap.setup.NothingPackageStatus
 import com.abdulkus.essentialremap.setup.PackageOperation
 import com.abdulkus.essentialremap.setup.SetupPhase
+import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
 
 @Composable
 fun EssentialRemapApp(
@@ -362,13 +363,13 @@ private fun ReleaseKeyStep(
     StatusCard(
         success = state.setup.screenOffAccessGranted,
         title = if (state.setup.screenOffAccessGranted) {
-            language.t("Screen-off access is ready", "Работа с погашенным экраном готова")
+            language.t("Sleep monitor is running", "Монитор сна работает")
         } else {
-            language.t("Screen-off access is not configured", "Работа с погашенным экраном не настроена")
+            language.t("Sleep monitor needs setup", "Нужно запустить монитор сна")
         },
         detail = language.t(
-            "Reads only Essential Key entries from the system log",
-            "Читаются только записи Essential Key из системного журнала",
+            "Shell UID, scan code 250 only, no idle wake lock",
+            "UID shell, только scan code 250, без удержания процессора",
         ),
     )
     Spacer(Modifier.height(14.dp))
@@ -385,7 +386,7 @@ private fun ReleaseKeyStep(
         ) {
             Text(
                 if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
-                    language.t("ENABLE SCREEN-OFF ACCESS", "ВКЛЮЧИТЬ РАБОТУ ВО СНЕ")
+                    language.t("START SLEEP MONITOR", "ЗАПУСТИТЬ МОНИТОР СНА")
                 } else {
                     language.t("SET UP WITH WIRELESS ADB", "НАСТРОИТЬ ЧЕРЕЗ WIRELESS ADB")
                 },
@@ -506,10 +507,7 @@ private fun SetupProgress(
 
 @Composable
 private fun ManualCommands(language: AppLanguage, copyText: (String) -> Unit) {
-    val commands = "adb shell pm disable-user --user 0 com.nothing.ntessentialspace\n" +
-        "adb shell pm disable-user --user 0 com.nothing.ntessentialrecorder\n" +
-        "adb shell pm grant com.abdulkus.essentialremap android.permission.READ_LOGS\n" +
-        "adb shell settings put secure nt_block_essential_key 0"
+    val commands = remember { ShellKeyMonitorCommands.manualAdbCommands() }
     var expanded by rememberSaveable { mutableStateOf(false) }
     TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
         Text(language.t("Manual ADB commands", "Команды ADB вручную"))
@@ -1056,11 +1054,14 @@ private fun SettingsDialog(
                     StatusCard(
                         state.setup.screenOffAccessGranted,
                         if (state.setup.screenOffAccessGranted) {
-                            language.t("Screen-off access enabled", "Работа с погашенным экраном включена")
+                            language.t("Sleep monitor is running", "Монитор сна работает")
                         } else {
-                            language.t("Screen-off access needs setup", "Нужно настроить работу с погашенным экраном")
+                            language.t("Sleep monitor needs restart", "Нужно запустить монитор сна")
                         },
-                        language.t("No permanent wake lock", "Без постоянного удержания процессора"),
+                        language.t(
+                            "No idle wake lock; restart it here after a phone reboot",
+                            "Без удержания процессора; после перезагрузки запустите здесь снова",
+                        ),
                     )
                     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR) {
                         SetupProgress(language, state, pairingCode, { pairingCode = it.filter(Char::isDigit).take(6) }, submitPairingCode, cancelPackageSetup)
@@ -1073,9 +1074,9 @@ private fun SettingsDialog(
                             Button(onClick = { beginPackageSetup(PackageOperation.DISABLE) }, modifier = Modifier.weight(1f)) {
                                 Text(
                                     if (state.setup.screenOffAccessGranted) {
-                                        language.t("REPAIR SLEEP", "ИСПРАВИТЬ СОН")
+                                        language.t("RESTART MONITOR", "ПЕРЕЗАПУСТИТЬ")
                                     } else {
-                                        language.t("ENABLE SLEEP", "РАБОТА ВО СНЕ")
+                                        language.t("START MONITOR", "ЗАПУСТИТЬ")
                                     },
                                     textAlign = TextAlign.Center,
                                 )
