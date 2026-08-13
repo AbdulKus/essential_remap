@@ -2,9 +2,13 @@ package com.abdulkus.essentialremap
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import com.abdulkus.essentialremap.data.SettingsRepository
 import com.abdulkus.essentialremap.domain.AppSettings
@@ -76,14 +80,44 @@ class KeyAccessibilityService : AccessibilityService() {
             val result = actionExecutor.execute(
                 action = config,
                 performGlobalAction = ::performGlobalAction,
+                performNavigationHandleLongPress = ::performNavigationHandleLongPress,
             )
             val prefix = if (result.successful) "Done" else "Error"
             repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
         }
     }
 
+    /**
+     * Fallback for ROMs that block direct voice-interaction access. It reproduces the documented
+     * Circle to Search gesture at the centre of the navigation handle (or Home button).
+     */
+    private fun performNavigationHandleLongPress(): Boolean {
+        val windowManager = getSystemService(WindowManager::class.java)
+        val metrics = windowManager.currentWindowMetrics
+        val bounds = metrics.bounds
+        val navigationInset = metrics.windowInsets
+            .getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
+            .bottom
+        val fallbackInset = (24f * resources.displayMetrics.density).toInt()
+        val bottomInset = navigationInset.takeIf { it > 0 } ?: fallbackInset
+        val path = Path().apply {
+            moveTo(bounds.exactCenterX(), bounds.bottom - bottomInset / 2f)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(
+                GestureDescription.StrokeDescription(
+                    path,
+                    0L,
+                    NAVIGATION_LONG_PRESS_MS,
+                ),
+            )
+            .build()
+        return dispatchGesture(gesture, null, null)
+    }
+
     private companion object {
         const val ESSENTIAL_KEY_SCAN_CODE = 250
+        const val NAVIGATION_LONG_PRESS_MS = 700L
     }
 
     private class HandlerScheduler(private val handler: Handler) : GestureClassifier.Scheduler {

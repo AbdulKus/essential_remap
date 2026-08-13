@@ -377,8 +377,8 @@ private fun AccessibilityStep(
         "02",
         language.t("Allow key listener", "Разрешите перехват кнопки"),
         language.t(
-            "Android exposes global hardware keys through Accessibility Service. Essential Remap consumes only scan code 250. It cannot read screen content and does not send data.",
-            "Android даёт глобальный доступ к аппаратным клавишам через службу специальных возможностей. Essential Remap обрабатывает только scan code 250, не читает экран и не отправляет данные.",
+            "Android exposes global hardware keys through Accessibility Service. Essential Remap consumes only scan code 250 and can reproduce a navigation-handle hold only for Circle to Search. It cannot read screen content and does not send data.",
+            "Android даёт глобальный доступ к аппаратным клавишам через службу специальных возможностей. Essential Remap обрабатывает только scan code 250 и может воспроизвести удержание нижней полоски только для Circle to Search. Приложение не читает экран и не отправляет данные.",
         ),
     )
     Spacer(Modifier.height(24.dp))
@@ -738,7 +738,7 @@ private fun ActionChooserDialog(
 ) {
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
-        ActionOption("Circle to Search", language.t("Google must be the default assistant", "Google должен быть помощником по умолчанию")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
+        ActionOption("Circle to Search", language.t("Google + Hold handle to search", "Google + удержание полоски для поиска")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
         ActionOption(language.t("Voice assistant", "Голосовой помощник")) { chooseSystem(SystemAction.ASSISTANT) },
         ActionOption(language.t("Flashlight", "Фонарик")) { chooseKind(ActionKind.FLASHLIGHT) },
         ActionOption(language.t("Take screenshot", "Снимок экрана")) { chooseSystem(SystemAction.SCREENSHOT) },

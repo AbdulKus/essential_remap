@@ -8,7 +8,6 @@ import android.media.AudioManager
 import android.provider.MediaStore
 import android.net.Uri
 import android.os.Build
-import android.os.SystemClock
 import android.view.KeyEvent
 import com.abdulkus.essentialremap.domain.ActionUrlResolver
 import com.abdulkus.essentialremap.domain.ConfiguredAction
@@ -28,6 +27,7 @@ class ActionExecutor(
     context: Context,
     private val torchController: TorchController,
     private val httpExecutor: HttpRequestExecutor = HttpRequestExecutor(),
+    private val assistantController: AssistantController = AssistantController(context),
 ) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
@@ -36,6 +36,7 @@ class ActionExecutor(
     suspend fun execute(
         action: ConfiguredAction,
         performGlobalAction: (Int) -> Boolean,
+        performNavigationHandleLongPress: () -> Boolean,
     ): ActionExecutionResult = when (action) {
         ConfiguredAction.None -> ActionExecutionResult(true, "No action configured")
         is ConfiguredAction.Http -> withContext(Dispatchers.IO) {
@@ -70,7 +71,11 @@ class ActionExecutor(
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url)))
         }
         is ConfiguredAction.PerformSystemAction -> withContext(Dispatchers.Main.immediate) {
-            performSystemAction(action.action, performGlobalAction)
+            performSystemAction(
+                action = action.action,
+                perform = performGlobalAction,
+                performNavigationHandleLongPress = performNavigationHandleLongPress,
+            )
         }
     }
 
@@ -118,29 +123,18 @@ class ActionExecutor(
     private fun performSystemAction(
         action: SystemAction,
         perform: (Int) -> Boolean,
+        performNavigationHandleLongPress: () -> Boolean,
     ): ActionExecutionResult = when (action) {
         SystemAction.MEDIA_PLAY_PAUSE -> dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
         SystemAction.MEDIA_NEXT -> dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
         SystemAction.MEDIA_PREVIOUS -> dispatchMediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
         SystemAction.CAMERA -> startActivity(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
-        SystemAction.ASSISTANT -> startAssist(INVOCATION_TYPE_ASSIST_BUTTON)
-        SystemAction.CIRCLE_TO_SEARCH -> startAssist(INVOCATION_TYPE_NAV_HANDLE_LONG_PRESS)
+        SystemAction.ASSISTANT -> assistantController.startVoiceAssistant()
+        SystemAction.CIRCLE_TO_SEARCH -> assistantController.startCircleToSearch(
+            performNavigationHandleLongPress,
+        )
         else -> performAccessibilityAction(action, perform)
     }
-
-    /**
-     * Android has no public Circle to Search action. The Google app does, however, receive the
-     * standard SystemUI assistant invocation type. Type 8 is the platform value for a navigation
-     * handle long press, which is the official Circle to Search gesture. If the installed/default
-     * assistant does not implement that mode, Android falls back to its normal assist UI.
-     */
-    private fun startAssist(invocationType: Int): ActionExecutionResult = startActivity(
-        Intent(Intent.ACTION_ASSIST).apply {
-            putExtra(INVOCATION_TYPE_KEY, invocationType)
-            putExtra(INVOCATION_TIME_MS_KEY, SystemClock.elapsedRealtime())
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        },
-    )
 
     private fun dispatchMediaKey(keyCode: Int): ActionExecutionResult = runCatching {
         audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
@@ -188,10 +182,4 @@ class ActionExecutor(
         }
     }
 
-    private companion object {
-        const val INVOCATION_TYPE_KEY = "invocation_type"
-        const val INVOCATION_TIME_MS_KEY = "invocation_time_ms"
-        const val INVOCATION_TYPE_ASSIST_BUTTON = 7
-        const val INVOCATION_TYPE_NAV_HANDLE_LONG_PRESS = 8
-    }
 }

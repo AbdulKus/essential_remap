@@ -9,7 +9,7 @@ The app is designed for Nothing OS and includes Russian and English interfaces.
 ## Features
 
 - Launch any app with a launcher activity.
-- Voice assistant and best-effort Circle to Search invocation.
+- Voice assistant and native Circle to Search invocation with a gesture fallback.
 - Flashlight, camera, screenshot, lock, power menu, notifications, Quick Settings.
 - Home, Back, Recents, and media controls.
 - Normal, vibrate, silent, and silent/normal toggle.
@@ -35,11 +35,11 @@ pm disable-user --user 0 com.nothing.ntessentialrecorder
 
 No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
 
-After the key is released, an `AccessibilityService` requests Android's key-event filter and consumes only events whose scan code is `250`. It does not retrieve window content, inspect the screen, type text, or collect accessibility data. Android documents this API as receiving key events before the rest of the system and allowing a handled event to be consumed.
+After the key is released, an `AccessibilityService` requests Android's key-event filter and consumes only events whose scan code is `250`. It does not retrieve window content, inspect the screen, type text, or collect accessibility data. Android documents this API as receiving key events before the rest of the system and allowing a handled event to be consumed. Gesture capability is used only as a fallback to reproduce a long press on the bottom navigation handle when Circle to Search is explicitly assigned and triggered.
 
 ## Circle to Search
 
-Android does not expose a public `CIRCLE_TO_SEARCH` action. Essential Remap launches the standard Assist intent with AOSP invocation type `8`, which Android defines as a navigation-handle long press. On supported Google app/Nothing OS versions this is the same invocation used for Circle to Search. Google must be the default digital assistant and **Use screenshot** must be enabled. If Google changes or does not support this route, the normal assistant may open instead.
+Android does not expose a public `CIRCLE_TO_SEARCH` action. Essential Remap requests a contextual session from Android's active voice-interaction service with Google's `omni.entry_point` and AOSP invocation type `8`. If Nothing OS blocks that non-SDK route, the accessibility service reproduces a 700 ms hold on the navigation handle/Home button instead. Unlike the old `ACTION_ASSIST` implementation, neither path deliberately opens the Google app home screen. Google must be the default digital assistant, **Use screenshot** must be enabled, and **Hold handle to search** must be enabled in navigation settings.
 
 ## Install
 

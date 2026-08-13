@@ -8,5 +8,10 @@ https://github.com/wreck2053/essential-key
 
 Both projects are distributed under the MIT License included in LICENSE.
 
-AOSP assistant invocation constants are documented by the Android Open Source Project
-and used here through public Intent extras; no AOSP source code is bundled.
+AOSP assistant invocation contracts are documented by the Android Open Source Project;
+no AOSP source code is bundled.
+
+Android Hidden Api Bypass 6.1
+Copyright 2021-2025 LSPosed
+https://github.com/LSPosed/AndroidHiddenApiBypass
+Licensed under the Apache License, Version 2.0.
