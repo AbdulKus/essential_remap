@@ -1,5 +1,7 @@
 # Essential Remap
 
+[![Android build and release](https://github.com/AbdulKus/essential_remap/actions/workflows/android.yml/badge.svg)](https://github.com/AbdulKus/essential_remap/actions/workflows/android.yml)
+
 Essential Remap turns the Nothing/CMF **Essential Key** into a configurable global button. It handles the key's Linux scan code `250` and supports separate actions for a single press, double press, and hold.
 
 The app is designed for Nothing OS and includes Russian and English interfaces.
