@@ -1,7 +1,7 @@
 package com.abdulkus.essentialremap
 
 import android.content.Context
-import android.content.pm.PackageManager
+import android.provider.Settings
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -11,25 +11,46 @@ object ScreenOffKeyAccess {
 
     private val mutableChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes: SharedFlow<Unit> = mutableChanges.asSharedFlow()
-    @Volatile private var monitorStartAllowed = false
 
-    fun isGranted(context: Context): Boolean =
-        context.checkSelfPermission(READ_LOGS_PERMISSION) == PackageManager.PERMISSION_GRANTED
+    /**
+     * A shell process cannot survive a reboot. BOOT_COUNT makes the UI stop claiming that sleep
+     * handling is ready as soon as the device has restarted.
+     */
+    fun isGranted(context: Context): Boolean {
+        val preferences = preferences(context)
+        return preferences.getBoolean(KEY_STARTED, false) &&
+            preferences.getInt(KEY_BOOT_COUNT, -1) == bootCount(context)
+    }
+
+    fun markStarted(context: Context) {
+        preferences(context).edit()
+            .putBoolean(KEY_STARTED, true)
+            .putInt(KEY_BOOT_COUNT, bootCount(context))
+            .apply()
+        notifyChanged()
+    }
+
+    fun markStopped(context: Context) {
+        preferences(context).edit().clear().apply()
+        notifyChanged()
+    }
 
     fun notifyChanged() {
         mutableChanges.tryEmit(Unit)
     }
 
-    /**
-     * Android adds READ_LOGS' supplemental `log` group only when a process is forked. Waiting for
-     * the activity also makes Android's one-time log-access confirmation eligible to be shown.
-     */
-    fun allowMonitorStart() {
-        monitorStartAllowed = true
-        notifyChanged()
-    }
+    private fun preferences(context: Context) = context.getSharedPreferences(
+        PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
 
-    fun canStartMonitor(): Boolean = monitorStartAllowed
+    private fun bootCount(context: Context): Int = Settings.Global.getInt(
+        context.contentResolver,
+        Settings.Global.BOOT_COUNT,
+        -1,
+    )
 
-    private const val READ_LOGS_PERMISSION = "android.permission.READ_LOGS"
+    private const val PREFERENCES = "shell_key_monitor"
+    private const val KEY_STARTED = "started"
+    private const val KEY_BOOT_COUNT = "boot_count"
 }

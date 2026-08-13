@@ -34,7 +34,6 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var repository: SettingsRepository
     private lateinit var hapticEngine: HapticEngine
     private lateinit var classifier: GestureClassifier
-    private lateinit var screenOffKeyMonitor: ScreenOffKeyMonitorClient
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -43,7 +42,11 @@ class KeyAccessibilityService : AccessibilityService() {
     private var gestureStartedWhileLocked = false
     private var gestureStartedScreenOff = false
     private var activeWakeLock: PowerManager.WakeLock? = null
+    private val physicalKeyEventGate = PhysicalKeyEventGate()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val shellKeyListener: (ScreenOffKeyEvent) -> Unit = { event ->
+        mainHandler.post { handleScreenOffKeyEvent(event) }
+    }
     @Volatile private var currentSettings = AppSettings()
 
     override fun onServiceConnected() {
@@ -61,17 +64,10 @@ class KeyAccessibilityService : AccessibilityService() {
             onAction = ::executeAction,
             longPressMs = LONG_PRESS_MS,
         )
-        screenOffKeyMonitor = ScreenOffKeyMonitorClient(this) { event ->
-            mainHandler.post { handleScreenOffKeyEvent(event) }
-        }
+        ShellKeyEventBus.attach(shellKeyListener)
         serviceScope.launch {
             repository.settings.collectLatest { settings ->
                 currentSettings = settings
-                mainHandler.post(::applyRuntimeState)
-            }
-        }
-        serviceScope.launch {
-            ScreenOffKeyAccess.changes.collectLatest {
                 mainHandler.post(::applyRuntimeState)
             }
         }
@@ -87,15 +83,17 @@ class KeyAccessibilityService : AccessibilityService() {
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
-                beginGestureSequence(
+                handlePhysicalKeyDown(
                     repeatCount = event.repeatCount,
                     startedScreenOff = !powerManager.isInteractive,
+                    downTimeNanos = event.downTime * NANOS_PER_MILLISECOND,
                 )
-                classifier.onKeyDown(event.repeatCount)
             }
             KeyEvent.ACTION_UP -> {
-                classifier.onKeyUp(event.isCanceled)
-                if (event.isCanceled) finishGestureSequence()
+                handlePhysicalKeyUp(
+                    downTimeNanos = event.downTime * NANOS_PER_MILLISECOND,
+                    canceled = event.isCanceled,
+                )
             }
         }
         return true
@@ -110,7 +108,7 @@ class KeyAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (::classifier.isInitialized) classifier.reset()
-        if (::screenOffKeyMonitor.isInitialized) screenOffKeyMonitor.close()
+        ShellKeyEventBus.detach(shellKeyListener)
         finishGestureSequence()
         serviceScope.cancel()
         super.onDestroy()
@@ -169,15 +167,22 @@ class KeyAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun beginGestureSequence(repeatCount: Int, startedScreenOff: Boolean) {
-        if (repeatCount != 0 || gestureSequenceActive) return
-        gestureSequenceActive = true
-        gestureStartedScreenOff = startedScreenOff
-        gestureStartedWhileLocked = startedScreenOff || keyguardManager.isKeyguardLocked
+    private fun handlePhysicalKeyDown(
+        repeatCount: Int,
+        startedScreenOff: Boolean,
+        downTimeNanos: Long,
+    ) {
+        if (repeatCount != 0) return
+        val gateResult = physicalKeyEventGate.onDown(downTimeNanos)
+        if (gateResult != PhysicalKeyEventGate.DownResult.NEW && !gestureSequenceActive) return
+        if (!gestureSequenceActive) gestureSequenceActive = true
+        gestureStartedScreenOff = gestureStartedScreenOff || startedScreenOff
+        gestureStartedWhileLocked = gestureStartedWhileLocked ||
+            startedScreenOff || keyguardManager.isKeyguardLocked
 
         // The key event itself wakes the input pipeline. Keep only the CPU alive long enough to
         // classify the user's press and dispatch the selected action, never while idle.
-        if (startedScreenOff && PressAction.entries.any { action ->
+        if (startedScreenOff && activeWakeLock?.isHeld != true && PressAction.entries.any { action ->
                 currentSettings.runWhileLocked[action] == true &&
                     currentSettings.actions[action] != ConfiguredAction.None
             }
@@ -190,46 +195,47 @@ class KeyAccessibilityService : AccessibilityService() {
                 acquire(WAKE_LOCK_TIMEOUT_MS)
             }
         }
+        if (gateResult == PhysicalKeyEventGate.DownResult.NEW) {
+            classifier.onKeyDown(repeatCount)
+        }
+    }
+
+    private fun handlePhysicalKeyUp(downTimeNanos: Long, canceled: Boolean) {
+        if (!physicalKeyEventGate.onUp(downTimeNanos)) return
+        classifier.onKeyUp(canceled)
+        if (canceled) finishGestureSequence()
     }
 
     private fun handleScreenOffKeyEvent(event: ScreenOffKeyEvent) {
         if (!currentSettings.remappingEnabled) return
         when (event.action) {
             ScreenOffKeyAction.DOWN -> {
-                beginGestureSequence(
+                handlePhysicalKeyDown(
                     repeatCount = event.repeatCount,
                     startedScreenOff = !event.interactive,
+                    downTimeNanos = event.downTimeNanos,
                 )
-                classifier.onKeyDown(event.repeatCount)
             }
-            ScreenOffKeyAction.UP -> classifier.onKeyUp(canceled = false)
+            ScreenOffKeyAction.UP -> handlePhysicalKeyUp(
+                downTimeNanos = event.downTimeNanos,
+                canceled = false,
+            )
         }
     }
 
     private fun applyRuntimeState() {
-        if (!::classifier.isInitialized || !::screenOffKeyMonitor.isInitialized) return
-        if (shouldReadScreenOffKey()) {
-            screenOffKeyMonitor.start()
-        } else {
-            screenOffKeyMonitor.stop()
+        if (!::classifier.isInitialized) return
+        if (!currentSettings.remappingEnabled) {
             classifier.reset()
             finishGestureSequence()
         }
     }
 
-    private fun shouldReadScreenOffKey(): Boolean =
-        currentSettings.remappingEnabled &&
-            ScreenOffKeyAccess.isGranted(this) &&
-            ScreenOffKeyAccess.canStartMonitor() &&
-            PressAction.entries.any { action ->
-                currentSettings.runWhileLocked[action] == true &&
-                    currentSettings.actions[action] != ConfiguredAction.None
-            }
-
     private fun finishGestureSequence() {
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
         gestureStartedScreenOff = false
+        physicalKeyEventGate.reset()
         releaseWakeLock(activeWakeLock)
         activeWakeLock = null
     }
@@ -283,6 +289,7 @@ class KeyAccessibilityService : AccessibilityService() {
         const val NAVIGATION_LONG_PRESS_MS = 700L
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
+        const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 
     private class HandlerScheduler(private val handler: Handler) : GestureClassifier.Scheduler {

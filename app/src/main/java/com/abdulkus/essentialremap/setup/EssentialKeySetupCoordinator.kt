@@ -226,11 +226,16 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 val output = executeAllowlisted(connectedManager, command)
                 diagnostics.log("Command output: ${output.take(MAX_LOG_OUTPUT_CHARS)}")
             }
+            if (operation == PackageOperation.RESTORE) {
+                ScreenOffKeyAccess.markStopped(appContext)
+            }
             val packageStatus = verifyPackageState(connectedManager, operation)
             val screenOffAccessGranted = if (operation == PackageOperation.DISABLE) {
                 verifyScreenOffAccess(connectedManager)
+                ScreenOffKeyAccess.markStarted(appContext)
+                true
             } else {
-                ScreenOffKeyAccess.isGranted(appContext)
+                false
             }
             diagnostics.log("Package verification succeeded: status=$packageStatus")
             _state.value = EssentialKeySetupState(
@@ -240,8 +245,8 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 operation = operation,
                 message = if (operation == PackageOperation.DISABLE) {
                     text(
-                        "Essential Key released and screen-off access enabled. You can turn off Wireless debugging.",
-                        "Essential Key освобождена, работа с погашенным экраном включена. Wireless debugging можно выключить.",
+                        "Essential Key released and the shell sleep monitor started. You can turn off Wireless debugging.",
+                        "Essential Key освобождена, shell-монитор сна запущен. Wireless debugging можно выключить.",
                     )
                 } else {
                     text(
@@ -285,29 +290,35 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         require(EssentialKeySetupCommands.isAllowlisted(command)) {
             "Command is not allowlisted"
         }
-        val needsMarker = command == EssentialKeySetupCommands.GRANT_READ_LOGS ||
-            command == EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH
         return readShellOutput(manager, command) { output ->
-            if (needsMarker) {
-                output.contains(EssentialKeySetupCommands.COMMAND_OK)
-            } else {
-                output.contains("new state:", ignoreCase = true)
+            when (command) {
+                EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH ->
+                    output.contains(EssentialKeySetupCommands.COMMAND_OK)
+                ShellKeyMonitorCommands.installAndStart ->
+                    output.contains(ShellKeyMonitorCommands.START_OK)
+                ShellKeyMonitorCommands.stop ->
+                    output.contains(ShellKeyMonitorCommands.STOP_OK)
+                else -> output.contains("new state:", ignoreCase = true)
             }
         }.trim()
     }
 
     private fun verifyScreenOffAccess(manager: LocalAdbConnectionManager): Boolean {
-        if (!ScreenOffKeyAccess.isGranted(appContext)) {
-            error("Android did not grant system-log access")
-        }
-        val output = readShellOutput(
+        val settingOutput = readShellOutput(
             manager,
             EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
         ) { it.lineSequence().any { line -> line.trim() == "0" } }
-        if (output.lineSequence().none { it.trim() == "0" }) {
+        if (settingOutput.lineSequence().none { it.trim() == "0" }) {
             error("Android did not enable reliable Essential Key wake dispatch")
         }
-        diagnostics.log("Screen-off access verified: READ_LOGS granted, nt_block_essential_key=0")
+        val monitorOutput = readShellOutput(
+            manager,
+            ShellKeyMonitorCommands.status,
+        ) { it.contains(ShellKeyMonitorCommands.RUNNING) }
+        if (!monitorOutput.contains(ShellKeyMonitorCommands.RUNNING)) {
+            error("Android did not keep the shell key monitor running")
+        }
+        diagnostics.log("Screen-off access verified: shell monitor running, nt_block_essential_key=0")
         return true
     }
 
