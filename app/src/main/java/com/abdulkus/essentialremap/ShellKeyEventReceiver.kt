@@ -25,9 +25,19 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
             diagnostics.log("Runtime receiver: rejected sender uid=$senderUid")
             return
         }
+        val monitorStatus = intent.getStringExtra(EXTRA_MONITOR_STATUS)
+            ?.replace('\n', ' ')
+            ?.replace('\r', ' ')
+            ?.take(MAX_MONITOR_STATUS_LENGTH)
+            ?.takeIf(String::isNotBlank)
+        if (monitorStatus != null) {
+            diagnostics.log("Shell monitor: $monitorStatus")
+        }
         val action = ScreenOffKeyAction.entries.getOrNull(intent.getIntExtra(EXTRA_ACTION, -1))
         if (action == null) {
-            diagnostics.log("Runtime receiver: rejected invalid action extra")
+            if (monitorStatus == null) {
+                diagnostics.log("Runtime receiver: rejected invalid action extra")
+            }
             return
         }
         val event = ScreenOffKeyEvent(
@@ -59,6 +69,8 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         private const val EXTRA_DOWN_TIME = "down_time"
         private const val EXTRA_REPEAT_COUNT = "repeat_count"
         private const val EXTRA_INTERACTIVE = "interactive"
+        private const val EXTRA_MONITOR_STATUS = "monitor_status"
+        private const val MAX_MONITOR_STATUS_LENGTH = 240
     }
 }
 
