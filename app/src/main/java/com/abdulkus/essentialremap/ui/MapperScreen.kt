@@ -134,6 +134,8 @@ fun EssentialRemapApp(
             submitPairingCode = viewModel::submitPairingCode,
             cancelPackageSetup = viewModel::cancelPackageSetup,
             copyText = copyText,
+            copyDiagnostics = { copyText(viewModel.diagnosticReport()) },
+            clearDiagnostics = viewModel::clearDiagnostics,
             finish = {
                 preferences.onboardingComplete = true
                 onboardingComplete = true
@@ -156,6 +158,8 @@ fun EssentialRemapApp(
         submitPairingCode = viewModel::submitPairingCode,
         cancelPackageSetup = viewModel::cancelPackageSetup,
         copyText = copyText,
+        copyDiagnostics = { copyText(viewModel.diagnosticReport()) },
+        clearDiagnostics = viewModel::clearDiagnostics,
         updateActionKind = viewModel::updateActionKind,
         updateHttpBaseUrl = viewModel::updateHttpBaseUrl,
         updateHttpMethod = viewModel::updateHttpMethod,
@@ -261,6 +265,8 @@ private fun OnboardingScreen(
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
     copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
     finish: () -> Unit,
 ) {
     var page by rememberSaveable { mutableStateOf(0) }
@@ -301,6 +307,8 @@ private fun OnboardingScreen(
                     cancelPackageSetup,
                     openDeveloperOptions,
                     copyText,
+                    copyDiagnostics,
+                    clearDiagnostics,
                 )
                 1 -> AccessibilityStep(language, state, openAccessibilitySettings)
                 else -> ReadyStep(language)
@@ -341,6 +349,8 @@ private fun ReleaseKeyStep(
     cancelPackageSetup: () -> Unit,
     openDeveloperOptions: () -> Unit,
     copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
 ) {
     StepHeading(
         "01",
@@ -374,7 +384,16 @@ private fun ReleaseKeyStep(
     )
     Spacer(Modifier.height(14.dp))
     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
-        SetupProgress(language, state, pairingCode, changePairingCode, submitPairingCode, cancelPackageSetup)
+        SetupProgress(
+            language,
+            state,
+            pairingCode,
+            changePairingCode,
+            submitPairingCode,
+            cancelPackageSetup,
+            copyDiagnostics,
+            clearDiagnostics,
+        )
     }
     if ((state.setup.packageStatus != NothingPackageStatus.DISABLED ||
             !state.setup.screenOffAccessGranted) && !state.setup.busy
@@ -470,6 +489,8 @@ private fun SetupProgress(
     changePairingCode: (String) -> Unit,
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp)) {
@@ -480,7 +501,11 @@ private fun SetupProgress(
                 modifier = Modifier.padding(top = if (state.setup.busy) 12.dp else 0.dp),
             )
             state.setup.message?.takeIf { state.setup.phase == SetupPhase.ERROR }?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 6.dp))
+                Text(
+                    it.takeLast(800),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
             if (state.setup.phase == SetupPhase.WAITING_FOR_CODE) {
                 OutlinedTextField(
@@ -500,9 +525,67 @@ private fun SetupProgress(
             if (state.setup.busy) {
                 TextButton(onClick = cancelPackageSetup) { Text(language.t("Cancel", "Отмена")) }
             }
+            if (state.setup.phase == SetupPhase.ERROR) {
+                Text(
+                    language.t(
+                        "Copy the diagnostic log after reproducing the error.",
+                        "После появления ошибки скопируйте журнал диагностики.",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                DiagnosticsActions(language, copyDiagnostics, clearDiagnostics)
+            }
         }
     }
     Spacer(Modifier.height(14.dp))
+}
+
+@Composable
+private fun DiagnosticsActions(
+    language: AppLanguage,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
+) {
+    var cleared by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(
+            onClick = {
+                cleared = false
+                copyDiagnostics()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                language.t("COPY DIAGNOSTIC LOG", "СКОПИРОВАТЬ ЖУРНАЛ"),
+                textAlign = TextAlign.Center,
+            )
+        }
+        OutlinedButton(
+            onClick = {
+                clearDiagnostics()
+                cleared = true
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                language.t("CLEAR DIAGNOSTIC LOG", "ОЧИСТИТЬ ЖУРНАЛ"),
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+    if (cleared) {
+        Text(
+            language.t("Diagnostic log cleared", "Журнал диагностики очищен"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
 }
 
 @Composable
@@ -537,6 +620,8 @@ private fun HomeScreen(
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
     copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
     updateActionKind: (PressAction, ActionKind) -> Unit,
     updateHttpBaseUrl: (PressAction, String) -> Unit,
     updateHttpMethod: (PressAction, RequestMethod) -> Unit,
@@ -703,6 +788,8 @@ private fun HomeScreen(
             submitPairingCode,
             cancelPackageSetup,
             copyText,
+            copyDiagnostics,
+            clearDiagnostics,
             changeLanguage,
             runSetupAgain,
             setRemappingEnabled,
@@ -1032,6 +1119,8 @@ private fun SettingsDialog(
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
     copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
     changeLanguage: (AppLanguage) -> Unit,
     runSetupAgain: () -> Unit,
     setRemappingEnabled: (Boolean) -> Unit,
@@ -1064,7 +1153,16 @@ private fun SettingsDialog(
                         ),
                     )
                     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR) {
-                        SetupProgress(language, state, pairingCode, { pairingCode = it.filter(Char::isDigit).take(6) }, submitPairingCode, cancelPackageSetup)
+                        SetupProgress(
+                            language,
+                            state,
+                            pairingCode,
+                            { pairingCode = it.filter(Char::isDigit).take(6) },
+                            submitPairingCode,
+                            cancelPackageSetup,
+                            copyDiagnostics,
+                            clearDiagnostics,
+                        )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
@@ -1119,6 +1217,17 @@ private fun SettingsDialog(
                     SectionLabel(language.t("APP", "ПРИЛОЖЕНИЕ"))
                     SettingsRow(language.t("Run setup again", "Повторить первоначальную настройку"), null) { dismiss(); runSetupAgain() }
                     SettingsRow(language.t("Android app info", "Информация о приложении"), null, openAppInfo)
+                    HorizontalDivider()
+                    SectionLabel(language.t("DIAGNOSTICS", "ДИАГНОСТИКА"))
+                    Text(
+                        language.t(
+                            "For a clean report, clear the log, reproduce the error once, then copy it. Pairing codes and private keys are never recorded.",
+                            "Для чистого отчёта очистите журнал, один раз повторите ошибку и скопируйте его. Коды сопряжения и закрытые ключи не записываются.",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    DiagnosticsActions(language, copyDiagnostics, clearDiagnostics)
                     WarningCard(language.t(
                         "Restore Essential Space before uninstalling. Removing this app alone does not re-enable Nothing's packages.",
                         "Перед удалением верните Essential Space. Удаление приложения само по себе не включит пакеты Nothing.",

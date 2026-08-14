@@ -138,7 +138,19 @@ class MapperViewModel(
 
     fun cancelPackageSetup() = setupCoordinator.cancel()
 
-    fun diagnosticReport(): String = setupCoordinator.diagnosticReport()
+    fun diagnosticReport(): String = buildString {
+        append(setupCoordinator.diagnosticReport().trimEnd())
+        appendLine()
+        appendLine("--- Current app state ---")
+        appendLine(
+            "Setup: phase=${_uiState.value.setup.phase} " +
+                "operation=${_uiState.value.setup.operation} " +
+                "package=${_uiState.value.setup.packageStatus} " +
+                "screenOff=${_uiState.value.setup.screenOffAccessGranted}",
+        )
+        appendLine("Accessibility: enabled=${_uiState.value.serviceEnabled}")
+        appendLine("Competing key services: ${_uiState.value.competingServices.joinToString().ifBlank { "none" }}")
+    }
 
     fun clearDiagnostics() = setupCoordinator.clearDiagnostics()
 

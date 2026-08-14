@@ -51,6 +51,8 @@ Android 13 and newer do not reliably allow a background app to reopen a full-dev
 
 The shell process naturally stops when the phone reboots. Essential Remap detects the changed Android boot count, marks sleep handling as needing setup, and can start the monitor again through the same Wireless ADB flow. No root or always-on CPU wake lock is used.
 
+The onboarding error card and Settings screen can copy or clear a persistent setup diagnostic log. It records app/device versions, setup phases, discovered local ADB endpoints, command results, and exception chains. Pairing codes and ADB private keys are never written to the log.
+
 The screen-off bridge is firmware-specific: a future Nothing OS update could remove or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
 
 ## Circle to Search

@@ -194,6 +194,35 @@ class MapperViewModelTest {
         assertFalse(viewModel.uiState.value.settings.remappingEnabled)
     }
 
+    @Test
+    fun diagnosticReportIncludesCurrentStateAndCanBeCleared() = runTest(dispatcher) {
+        val setup = FakeSetup().apply {
+            report = "persistent setup log"
+            flow.value = EssentialKeySetupState(
+                packageStatus = NothingPackageStatus.DISABLED,
+                screenOffAccessGranted = false,
+            )
+        }
+        val viewModel = MapperViewModel(FakeRepository(), FakeHapticEngine(), setup)
+        advanceUntilIdle()
+        viewModel.updateAccessibilityStatus(
+            AccessibilityStatus(
+                serviceEnabled = true,
+                competingKeyServices = listOf("example.Service"),
+            ),
+        )
+
+        val report = viewModel.diagnosticReport()
+
+        assertTrue(report.contains("persistent setup log"))
+        assertTrue(report.contains("package=DISABLED"))
+        assertTrue(report.contains("Accessibility: enabled=true"))
+        assertTrue(report.contains("example.Service"))
+
+        viewModel.clearDiagnostics()
+        assertTrue(setup.cleared)
+    }
+
     private class FakeRepository : SettingsRepository {
         val state = MutableStateFlow(
             AppSettings(
@@ -242,12 +271,16 @@ class MapperViewModelTest {
 
     private class FakeSetup : EssentialKeySetupController {
         val flow = MutableStateFlow(EssentialKeySetupState())
+        var report = ""
+        var cleared = false
         override val state = flow
         override fun refresh() = Unit
         override fun start(operation: PackageOperation) = Unit
         override fun submitPairingCode(code: String) = Unit
         override fun cancel() = Unit
-        override fun diagnosticReport() = ""
-        override fun clearDiagnostics() = Unit
+        override fun diagnosticReport() = report
+        override fun clearDiagnostics() {
+            cleared = true
+        }
     }
 }

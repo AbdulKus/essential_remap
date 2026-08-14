@@ -306,9 +306,14 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
     }
 
     private fun executeMonitorInstall(manager: LocalAdbConnectionManager): String {
+        diagnostics.log("Opening raw ADB installer: service=${ShellKeyMonitorCommands.INSTALL_SERVICE}")
         val stream = manager.openStream(ShellKeyMonitorCommands.INSTALL_SERVICE)
         try {
             val payload = ShellKeyMonitorCommands.installSessionScript.toByteArray(StandardCharsets.UTF_8)
+            diagnostics.log(
+                "Sending monitor installer: bytes=${payload.size} chunkBytes=$SHELL_WRITE_CHUNK_BYTES " +
+                    "expected=${ShellKeyMonitorCommands.START_CONFIRMATION}",
+            )
             val output = stream.openOutputStream()
             var offset = 0
             while (offset < payload.size) {
@@ -317,6 +322,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 offset += count
             }
             output.flush()
+            diagnostics.log("Monitor installer sent; waiting for exact revision confirmation")
             return collectShellOutput(
                 stream = stream,
                 description = "install shell key monitor",
@@ -486,7 +492,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         if (!complete(output.toString())) {
             diagnostics.log(
                 "Shell step did not confirm success: step=$description " +
-                    "output=${output.toString().take(MAX_LOG_OUTPUT_CHARS)}",
+                    "output=${output.toString().takeLast(MAX_LOG_OUTPUT_CHARS)}",
             )
             val details = output.toString().trim().takeLast(MAX_LOG_OUTPUT_CHARS)
                 .ifBlank { "no command output" }

@@ -2,6 +2,8 @@ package com.abdulkus.essentialremap.setup
 
 import android.content.Context
 import android.os.Build
+import android.os.Process
+import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import java.io.File
 import java.time.Instant
 
@@ -33,6 +35,14 @@ class SetupDiagnostics(context: Context) {
                 appendLine("App: ${packageInfo.versionName} ($versionCode)")
                 appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
                 appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+                appendLine("Build: ${Build.FINGERPRINT}")
+                appendLine("Process: ${Process.myPid()}")
+                appendLine("Nothing packages: ${NothingPackageStatusReader(appContext).read()}")
+                appendLine("Screen-off marker: ${ScreenOffKeyAccess.isGranted(appContext)}")
+                appendLine("ADB install service: ${ShellKeyMonitorCommands.INSTALL_SERVICE}")
+                appendLine("Expected monitor: ${ShellKeyMonitorCommands.RUNNING_CONFIRMATION}")
+                appendLine("Stored log bytes: ${file.takeIf(File::exists)?.length() ?: 0}")
+                appendLine("Pairing codes and ADB private keys are not logged.")
                 appendLine("---")
                 append(file.takeIf(File::exists)?.readText().orEmpty())
             }
@@ -40,7 +50,9 @@ class SetupDiagnostics(context: Context) {
     }.getOrElse { "Could not read diagnostics: ${it.message}" }
 
     fun clear() {
-        synchronized(lock) { file.delete() }
+        runCatching {
+            synchronized(lock) { file.delete() }
+        }
     }
 
     private companion object {
