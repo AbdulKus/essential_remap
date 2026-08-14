@@ -5,18 +5,31 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
+import com.abdulkus.essentialremap.setup.SetupDiagnostics
 
 /** Receives only explicit, DUMP-protected events emitted by the ADB shell monitor. */
 class ShellKeyEventReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-            sentFromUid != Process.SHELL_UID
-        ) {
+        val diagnostics = (context.applicationContext as? EssentialKeyApplication)
+            ?.container?.diagnostics ?: SetupDiagnostics(context)
+        if (intent.action != ACTION) {
+            diagnostics.log("Runtime receiver: rejected unexpected intent action=${intent.action}")
+            return
+        }
+        val senderUid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            sentFromUid
+        } else {
+            null
+        }
+        if (senderUid != null && senderUid != Process.SHELL_UID) {
+            diagnostics.log("Runtime receiver: rejected sender uid=$senderUid")
             return
         }
         val action = ScreenOffKeyAction.entries.getOrNull(intent.getIntExtra(EXTRA_ACTION, -1))
-            ?: return
+        if (action == null) {
+            diagnostics.log("Runtime receiver: rejected invalid action extra")
+            return
+        }
         val event = ScreenOffKeyEvent(
             action = action,
             eventTimeNanos = intent.getLongExtra(EXTRA_EVENT_TIME, -1L),
@@ -24,8 +37,19 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
             repeatCount = intent.getIntExtra(EXTRA_REPEAT_COUNT, -1),
             interactive = intent.getBooleanExtra(EXTRA_INTERACTIVE, true),
         )
-        if (event.eventTimeNanos <= 0L || event.downTimeNanos <= 0L || event.repeatCount < 0) return
-        ShellKeyEventBus.publish(event)
+        if (event.eventTimeNanos <= 0L || event.downTimeNanos <= 0L || event.repeatCount < 0) {
+            diagnostics.log(
+                "Runtime receiver: rejected malformed $action eventTime=${event.eventTimeNanos} " +
+                    "downTime=${event.downTimeNanos} repeat=${event.repeatCount}",
+            )
+            return
+        }
+        val delivery = ShellKeyEventBus.publish(event)
+        diagnostics.log(
+            "Runtime receiver: accepted source=shell uid=${senderUid ?: "manifest-permission"} " +
+                "action=$action interactive=${event.interactive} repeat=${event.repeatCount} " +
+                "downTime=${event.downTimeNanos} delivery=$delivery",
+        )
     }
 
     companion object {
@@ -39,14 +63,18 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
 }
 
 internal object ShellKeyEventBus {
+    enum class Delivery { LISTENER, QUEUED, QUEUED_AFTER_DROP }
+
     private const val MAX_PENDING_EVENTS = 8
     private val pending = ArrayDeque<ScreenOffKeyEvent>()
     private var listener: ((ScreenOffKeyEvent) -> Unit)? = null
 
     @Synchronized
-    fun attach(newListener: (ScreenOffKeyEvent) -> Unit) {
+    fun attach(newListener: (ScreenOffKeyEvent) -> Unit): Int {
         listener = newListener
+        val pendingCount = pending.size
         while (pending.isNotEmpty()) newListener(pending.removeFirst())
+        return pendingCount
     }
 
     @Synchronized
@@ -55,10 +83,14 @@ internal object ShellKeyEventBus {
     }
 
     @Synchronized
-    fun publish(event: ScreenOffKeyEvent) {
-        listener?.invoke(event) ?: run {
-            if (pending.size == MAX_PENDING_EVENTS) pending.removeFirst()
-            pending.addLast(event)
+    fun publish(event: ScreenOffKeyEvent): Delivery {
+        listener?.let {
+            it(event)
+            return Delivery.LISTENER
         }
+        val dropped = pending.size == MAX_PENDING_EVENTS
+        if (dropped) pending.removeFirst()
+        pending.addLast(event)
+        return if (dropped) Delivery.QUEUED_AFTER_DROP else Delivery.QUEUED
     }
 }

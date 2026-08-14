@@ -21,6 +21,7 @@ import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
 import com.abdulkus.essentialremap.domain.ScreenOffAfterWakePolicy
 import com.abdulkus.essentialremap.haptics.HapticEngine
+import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,12 +37,15 @@ class KeyAccessibilityService : AccessibilityService() {
     private lateinit var classifier: GestureClassifier
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
+    private lateinit var diagnostics: SetupDiagnostics
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var actionExecutor: ActionExecutor
     private var gestureSequenceActive = false
     private var gestureStartedWhileLocked = false
     private var gestureStartedScreenOff = false
     private var activeWakeLock: PowerManager.WakeLock? = null
+    private var settingsLoaded = false
+    private var shellListenerAttached = false
     private val physicalKeyEventGate = PhysicalKeyEventGate()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val shellKeyListener: (ScreenOffKeyEvent) -> Unit = { event ->
@@ -53,6 +57,7 @@ class KeyAccessibilityService : AccessibilityService() {
         val container = (application as EssentialKeyApplication).container
         repository = container.repository
         hapticEngine = container.hapticEngine
+        diagnostics = container.diagnostics
         actionExecutor = ActionExecutor(this, container.torchController)
         keyguardManager = getSystemService(KeyguardManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
@@ -64,26 +69,54 @@ class KeyAccessibilityService : AccessibilityService() {
             onAction = ::executeAction,
             longPressMs = LONG_PRESS_MS,
         )
-        ShellKeyEventBus.attach(shellKeyListener)
+        trace("accessibility service connected; waiting for stored settings before accepting queued events")
         serviceScope.launch {
             repository.settings.collectLatest { settings ->
-                currentSettings = settings
-                mainHandler.post(::applyRuntimeState)
+                withContext(Dispatchers.Main.immediate) {
+                    currentSettings = settings
+                    val firstLoad = !settingsLoaded
+                    settingsLoaded = true
+                    trace(
+                        "settings ${if (firstLoad) "loaded" else "updated"}: " +
+                            "enabled=${settings.remappingEnabled} " +
+                            "actions=${settings.actions.safeSummary()} " +
+                            "runWhileLocked=${settings.runWhileLocked.enabledSummary()} " +
+                            "turnOffAfterWake=${settings.turnScreenOffAfterWake.enabledSummary()}",
+                    )
+                    if (!shellListenerAttached) {
+                        val queuedEvents = ShellKeyEventBus.attach(shellKeyListener)
+                        shellListenerAttached = true
+                        trace("shell event listener attached; queuedEvents=$queuedEvents")
+                    }
+                    applyRuntimeState()
+                }
             }
         }
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (!::repository.isInitialized) return false
         // Nothing's Essential Key reports KEYCODE_UNKNOWN and Linux scan code 250. Matching only
         // the scan code avoids stealing ordinary buttons while remaining stable across input-device
         // descriptor changes after a Nothing OS update.
         if (event.scanCode != ESSENTIAL_KEY_SCAN_CODE) return false
-        if (!currentSettings.remappingEnabled) return false
+        if (!::repository.isInitialized || !settingsLoaded) {
+            trace("accessibility event ignored: settings not loaded action=${event.action.safeKeyAction()}")
+            return false
+        }
+        trace(
+            "accessibility event: action=${event.action.safeKeyAction()} interactive=${powerManager.isInteractive} " +
+                "locked=${keyguardManager.isKeyguardLocked} repeat=${event.repeatCount} " +
+                "downTimeMs=${event.downTime}",
+        )
+        if (!currentSettings.remappingEnabled) {
+            trace("accessibility event ignored: remapping disabled")
+            return false
+        }
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
                 handlePhysicalKeyDown(
+                    source = "accessibility",
                     repeatCount = event.repeatCount,
                     startedScreenOff = !powerManager.isInteractive,
                     downTimeNanos = event.downTime * NANOS_PER_MILLISECOND,
@@ -91,6 +124,7 @@ class KeyAccessibilityService : AccessibilityService() {
             }
             KeyEvent.ACTION_UP -> {
                 handlePhysicalKeyUp(
+                    source = "accessibility",
                     downTimeNanos = event.downTime * NANOS_PER_MILLISECOND,
                     canceled = event.isCanceled,
                 )
@@ -102,13 +136,16 @@ class KeyAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
     override fun onInterrupt() {
+        trace("accessibility service interrupted")
         if (::classifier.isInitialized) classifier.reset()
         finishGestureSequence()
     }
 
     override fun onDestroy() {
+        trace("accessibility service destroyed")
         if (::classifier.isInitialized) classifier.reset()
-        ShellKeyEventBus.detach(shellKeyListener)
+        if (shellListenerAttached) ShellKeyEventBus.detach(shellKeyListener)
+        shellListenerAttached = false
         finishGestureSequence()
         serviceScope.cancel()
         super.onDestroy()
@@ -123,7 +160,13 @@ class KeyAccessibilityService : AccessibilityService() {
         gestureStartedScreenOff = false
         activeWakeLock = null
 
+        trace(
+            "gesture classified: press=$action startedScreenOff=$startedScreenOff " +
+                "startedLocked=$startedWhileLocked",
+        )
+
         if (!currentSettings.remappingEnabled) {
+            trace("action rejected: remapping disabled")
             releaseWakeLock(wakeLock)
             return
         }
@@ -133,6 +176,10 @@ class KeyAccessibilityService : AccessibilityService() {
                 runWhileLocked = currentSettings.runWhileLocked,
             )
         ) {
+            trace(
+                "action rejected: press=$action startedLocked=$startedWhileLocked " +
+                    "runWhileLocked=${currentSettings.runWhileLocked[action] == true}",
+            )
             releaseWakeLock(wakeLock)
             return
         }
@@ -143,9 +190,14 @@ class KeyAccessibilityService : AccessibilityService() {
             turnScreenOffAfterWake = currentSettings.turnScreenOffAfterWake,
         )
         if (!ActionFeedbackPolicy.shouldPerformHaptic(config)) {
+            trace("action skipped: press=$action configured=NONE")
             releaseWakeLock(wakeLock)
             return
         }
+        trace(
+            "action dispatch: press=$action configured=${config.safeName()} " +
+                "turnScreenOffAfterWake=$turnScreenOffAfterWake",
+        )
         hapticEngine.perform(currentSettings.hapticStrength)
         serviceScope.launch {
             try {
@@ -154,13 +206,25 @@ class KeyAccessibilityService : AccessibilityService() {
                     performGlobalAction = ::performGlobalAction,
                     performNavigationHandleLongPress = ::performNavigationHandleLongPress,
                 )
+                trace(
+                    "action result: press=$action configured=${config.safeName()} " +
+                        "successful=${result.successful}",
+                )
                 if (turnScreenOffAfterWake) {
                     withContext(Dispatchers.Main.immediate) {
-                        performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                        val screenOffAccepted =
+                            performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
+                        trace("screen-off-after-wake requested; accepted=$screenOffAccepted")
                     }
                 }
                 val prefix = if (result.successful) "Done" else "Error"
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
+            } catch (error: Throwable) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                trace(
+                    "action exception: press=$action configured=${config.safeName()} " +
+                        "type=${error::class.java.simpleName}",
+                )
             } finally {
                 releaseWakeLock(wakeLock)
             }
@@ -168,13 +232,24 @@ class KeyAccessibilityService : AccessibilityService() {
     }
 
     private fun handlePhysicalKeyDown(
+        source: String,
         repeatCount: Int,
         startedScreenOff: Boolean,
         downTimeNanos: Long,
     ) {
-        if (repeatCount != 0) return
+        if (repeatCount != 0) {
+            trace("key down ignored: source=$source repeat=$repeatCount")
+            return
+        }
         val gateResult = physicalKeyEventGate.onDown(downTimeNanos)
-        if (gateResult != PhysicalKeyEventGate.DownResult.NEW && !gestureSequenceActive) return
+        trace(
+            "key down: source=$source gate=$gateResult startedScreenOff=$startedScreenOff " +
+                "sequenceActive=$gestureSequenceActive downTime=$downTimeNanos",
+        )
+        if (gateResult != PhysicalKeyEventGate.DownResult.NEW && !gestureSequenceActive) {
+            trace("key down ignored: completed duplicate without active gesture")
+            return
+        }
         if (!gestureSequenceActive) gestureSequenceActive = true
         gestureStartedScreenOff = gestureStartedScreenOff || startedScreenOff
         gestureStartedWhileLocked = gestureStartedWhileLocked ||
@@ -194,29 +269,48 @@ class KeyAccessibilityService : AccessibilityService() {
                 setReferenceCounted(false)
                 acquire(WAKE_LOCK_TIMEOUT_MS)
             }
+            trace("temporary action wake lock acquired timeoutMs=$WAKE_LOCK_TIMEOUT_MS")
         }
         if (gateResult == PhysicalKeyEventGate.DownResult.NEW) {
             classifier.onKeyDown(repeatCount)
+            trace("key down forwarded to gesture classifier")
         }
     }
 
-    private fun handlePhysicalKeyUp(downTimeNanos: Long, canceled: Boolean) {
-        if (!physicalKeyEventGate.onUp(downTimeNanos)) return
+    private fun handlePhysicalKeyUp(source: String, downTimeNanos: Long, canceled: Boolean) {
+        val accepted = physicalKeyEventGate.onUp(downTimeNanos)
+        trace(
+            "key up: source=$source accepted=$accepted canceled=$canceled downTime=$downTimeNanos",
+        )
+        if (!accepted) return
         classifier.onKeyUp(canceled)
         if (canceled) finishGestureSequence()
     }
 
     private fun handleScreenOffKeyEvent(event: ScreenOffKeyEvent) {
-        if (!currentSettings.remappingEnabled) return
+        trace(
+            "shell event delivered to service: action=${event.action} interactive=${event.interactive} " +
+                "repeat=${event.repeatCount} downTime=${event.downTimeNanos}",
+        )
+        if (!settingsLoaded) {
+            trace("shell event ignored unexpectedly: settings not loaded")
+            return
+        }
+        if (!currentSettings.remappingEnabled) {
+            trace("shell event ignored: remapping disabled")
+            return
+        }
         when (event.action) {
             ScreenOffKeyAction.DOWN -> {
                 handlePhysicalKeyDown(
+                    source = "shell",
                     repeatCount = event.repeatCount,
                     startedScreenOff = !event.interactive,
                     downTimeNanos = event.downTimeNanos,
                 )
             }
             ScreenOffKeyAction.UP -> handlePhysicalKeyUp(
+                source = "shell",
                 downTimeNanos = event.downTimeNanos,
                 canceled = false,
             )
@@ -241,7 +335,34 @@ class KeyAccessibilityService : AccessibilityService() {
     }
 
     private fun releaseWakeLock(wakeLock: PowerManager.WakeLock?) {
-        if (wakeLock?.isHeld == true) runCatching { wakeLock.release() }
+        if (wakeLock?.isHeld == true) {
+            runCatching { wakeLock.release() }
+                .onSuccess { trace("temporary action wake lock released") }
+        }
+    }
+
+    private fun trace(message: String) {
+        if (::diagnostics.isInitialized) diagnostics.log("Runtime: $message")
+    }
+
+    private fun Map<PressAction, ConfiguredAction>.safeSummary(): String = PressAction.entries
+        .joinToString(prefix = "[", postfix = "]") { press ->
+            "$press=${getValue(press).safeName()}"
+        }
+
+    private fun Map<PressAction, Boolean>.enabledSummary(): String = PressAction.entries
+        .filter { this[it] == true }
+        .joinToString(prefix = "[", postfix = "]")
+
+    private fun ConfiguredAction.safeName(): String = when (this) {
+        is ConfiguredAction.PerformSystemAction -> "SYSTEM_${action.name}"
+        else -> kind.name
+    }
+
+    private fun Int.safeKeyAction(): String = when (this) {
+        KeyEvent.ACTION_DOWN -> "DOWN"
+        KeyEvent.ACTION_UP -> "UP"
+        else -> "OTHER_$this"
     }
 
     /**

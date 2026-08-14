@@ -3,5 +3,5 @@
     <string name="app_name">Essential Remap</string>
     <string name="service_name">Essential Remap key listener</string>
     <string name="service_summary">Handles only the Nothing Essential Key (scan code 250)</string>
-    <string name="service_description">Required for global hardware-key filtering. The service consumes only scan code 250 and runs the configured action. With separate ADB permission, screen-off presses are detected from a system-log stream filtered to this key. For Circle to Search only, it may reproduce a hold on the bottom navigation handle. It cannot retrieve screen content, type text, save logs, or collect accessibility data.</string>
+    <string name="service_description">Required for global hardware-key filtering. The service consumes only scan code 250 and runs the configured action. With separate ADB permission, screen-off presses are detected from a system-log stream filtered to this key. For Circle to Search only, it may reproduce a hold on the bottom navigation handle. It cannot retrieve screen content, type text, or collect accessibility data. A local diagnostic log stores only Essential Key processing stages and can be cleared in the app.</string>
 </resources>

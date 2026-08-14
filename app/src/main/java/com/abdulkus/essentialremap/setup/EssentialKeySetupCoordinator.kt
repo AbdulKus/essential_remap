@@ -69,12 +69,14 @@ interface EssentialKeySetupController {
     fun clearDiagnostics()
 }
 
-class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupController {
+class EssentialKeySetupCoordinator(
+    context: Context,
+    private val diagnostics: SetupDiagnostics = SetupDiagnostics(context),
+) : EssentialKeySetupController {
     private val appContext = context.applicationContext
     private val statusReader = NothingPackageStatusReader(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val notificationManager = NotificationManagerCompat.from(appContext)
-    private val diagnostics = SetupDiagnostics(appContext)
     private val _state = MutableStateFlow(
         EssentialKeySetupState(
             packageStatus = statusReader.read(),
