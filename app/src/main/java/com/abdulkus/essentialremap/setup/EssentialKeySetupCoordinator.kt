@@ -306,7 +306,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
     }
 
     private fun executeMonitorInstall(manager: LocalAdbConnectionManager): String {
-        val stream = manager.openStream("shell:/system/bin/sh")
+        val stream = manager.openStream(ShellKeyMonitorCommands.INSTALL_SERVICE)
         try {
             val payload = ShellKeyMonitorCommands.installSessionScript.toByteArray(StandardCharsets.UTF_8)
             val output = stream.openOutputStream()
@@ -320,7 +320,7 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
             return collectShellOutput(
                 stream = stream,
                 description = "install shell key monitor",
-            ) { it.contains(ShellKeyMonitorCommands.START_OK) }.trim()
+            ) { it.contains(ShellKeyMonitorCommands.START_CONFIRMATION) }.trim()
         } finally {
             runCatching { stream.close() }
         }
@@ -337,8 +337,8 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
         val monitorOutput = readShellOutput(
             manager,
             ShellKeyMonitorCommands.status,
-        ) { it.contains(ShellKeyMonitorCommands.RUNNING) }
-        if (!monitorOutput.contains(ShellKeyMonitorCommands.RUNNING)) {
+        ) { it.contains(ShellKeyMonitorCommands.RUNNING_CONFIRMATION) }
+        if (!monitorOutput.contains(ShellKeyMonitorCommands.RUNNING_CONFIRMATION)) {
             error("Android did not keep the shell key monitor running")
         }
         diagnostics.log("Screen-off access verified: shell monitor running, nt_block_essential_key=0")
@@ -488,7 +488,8 @@ class EssentialKeySetupCoordinator(context: Context) : EssentialKeySetupControll
                 "Shell step did not confirm success: step=$description " +
                     "output=${output.toString().take(MAX_LOG_OUTPUT_CHARS)}",
             )
-            val details = output.toString().trim().ifBlank { "no command output" }
+            val details = output.toString().trim().takeLast(MAX_LOG_OUTPUT_CHARS)
+                .ifBlank { "no command output" }
             error("ADB step failed: $description. $details")
         }
         return output.toString()

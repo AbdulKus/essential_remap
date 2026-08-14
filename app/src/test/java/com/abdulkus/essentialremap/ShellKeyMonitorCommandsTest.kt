@@ -44,7 +44,25 @@ class ShellKeyMonitorCommandsTest {
 
         assertTrue(installer.contains("ESSENTIAL_REMAP_MONITOR_EOF"))
         assertTrue(installer.contains("/system/bin/base64 -d"))
+        assertTrue(installer.contains("key-monitor.sh.new"))
+        assertTrue(installer.contains("/system/bin/sh -n"))
+        assertTrue(installer.contains("MONITOR_REVISION=3"))
+        assertTrue(installer.contains("/system/bin/mv -f"))
         assertTrue(installer.endsWith("exit\n"))
         assertTrue(ShellKeyMonitorCommands.INSTALL.length < 100)
+        assertTrue(ShellKeyMonitorCommands.INSTALL_SERVICE.startsWith("exec:"))
+        assertFalse(ShellKeyMonitorCommands.INSTALL_SERVICE.startsWith("shell:"))
+        assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.startsWith(ShellKeyMonitorCommands.START_OK))
+        assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.startsWith(ShellKeyMonitorCommands.RUNNING))
+        assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.endsWith("revision=3"))
+        assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.endsWith("revision=3"))
+
+        val payloadLines = installer
+            .substringAfter("<<'ESSENTIAL_REMAP_MONITOR_EOF'\n")
+            .substringBefore("\nESSENTIAL_REMAP_MONITOR_EOF")
+            .lineSequence()
+            .toList()
+        assertTrue(payloadLines.isNotEmpty())
+        assertTrue(payloadLines.all { it.length <= 76 })
     }
 }
