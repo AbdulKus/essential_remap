@@ -13,7 +13,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 4
+    const val REVISION = 5
     const val START_CONFIRMATION = "essential-remap:shell-monitor-ok revision=" + REVISION
     const val RUNNING_CONFIRMATION = "essential-remap:shell-monitor-running revision=" + REVISION
 
@@ -113,14 +113,14 @@ object ShellKeyMonitorCommands {
         }
 
         resolve_interactive() {
-          target_down_time="${'$'}1"
+          target_down_time_ms="${'$'}1"
           resolve_attempt=0
           while [ "${'$'}resolve_attempt" -lt 5 ]; do
             matching_line="${'$'}(
               /system/bin/logcat -b system -d -v brief -t 64 \
                 '--regex=interceptKeyBeforeQueueing.*scanCode=250' 'WindowManager:D' '*:S' \
                 2>/dev/null |
-                /system/bin/grep -F "downTime=${'$'}target_down_time" |
+                /system/bin/grep -F "downTime=${'$'}target_down_time_ms" |
                 /system/bin/tail -n 1
             )"
             case "${'$'}matching_line" in
@@ -194,11 +194,12 @@ object ShellKeyMonitorCommands {
             set -- ${'$'}timestamp_part
             [ "${'$'}#" -ge 1 ] || continue
             event_time="${'$'}(event_time_from_getevent "${'$'}1")" || continue
-            log_monitor "raw input=${'$'}INPUT_DEVICE type=${'$'}event_type code=${'$'}event_code value=${'$'}event_value eventTime=${'$'}event_time"
+            event_time_ms=${'$'}((event_time / 1000000))
+            log_monitor "raw input=${'$'}INPUT_DEVICE type=${'$'}event_type code=${'$'}event_code value=${'$'}event_value eventTime=${'$'}event_time eventTimeMs=${'$'}event_time_ms"
 
             case "${'$'}event_value" in
               00000001)
-                interactive="${'$'}(resolve_interactive "${'$'}event_time")"
+                interactive="${'$'}(resolve_interactive "${'$'}event_time_ms")"
                 case "${'$'}interactive" in
                   false)
                     active_down_time="${'$'}event_time"
