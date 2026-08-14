@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: 0.1.10
+  APP_VERSION: 0.1.11
 
 jobs:
   build:

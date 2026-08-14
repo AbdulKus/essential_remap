@@ -164,7 +164,7 @@ class MainActivity : ComponentActivity() {
 
     private fun copyToClipboard(text: String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(
-            ClipData.newPlainText("ADB commands", text),
+            ClipData.newPlainText("Essential Remap", text),
         )
         val message = if (userPreferences.language == AppLanguage.RUSSIAN) {
             "Скопировано"
