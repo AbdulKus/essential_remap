@@ -27,6 +27,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -211,6 +212,11 @@ class KeyAccessibilityService : AccessibilityService() {
                         "successful=${result.successful}",
                 )
                 if (turnScreenOffAfterWake) {
+                    trace(
+                        "screen-off-after-wake scheduled; delayMs=" +
+                            SCREEN_OFF_AFTER_WAKE_DELAY_MS,
+                    )
+                    delay(SCREEN_OFF_AFTER_WAKE_DELAY_MS)
                     withContext(Dispatchers.Main.immediate) {
                         val screenOffAccepted =
                             performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
@@ -409,6 +415,7 @@ class KeyAccessibilityService : AccessibilityService() {
         const val LONG_PRESS_MS = 500L
         const val NAVIGATION_LONG_PRESS_MS = 700L
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
+        const val SCREEN_OFF_AFTER_WAKE_DELAY_MS = 750L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
         const val NANOS_PER_MILLISECOND = 1_000_000L
     }
