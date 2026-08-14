@@ -1221,8 +1221,8 @@ private fun SettingsDialog(
                     SectionLabel(language.t("DIAGNOSTICS", "ДИАГНОСТИКА"))
                     Text(
                         language.t(
-                            "For a clean report, clear the log, reproduce the error once, then copy it. Pairing codes and private keys are never recorded.",
-                            "Для чистого отчёта очистите журнал, один раз повторите ошибку и скопируйте его. Коды сопряжения и закрытые ключи не записываются.",
+                            "For a screen-off failure: clear the log, let the phone fully sleep, press Essential Key once, unlock with Power, then copy the log. Pairing codes, private keys and action URLs are never recorded.",
+                            "Если кнопка не работает во сне: очистите журнал, дождитесь полного засыпания, один раз нажмите Essential Key, разблокируйте телефон кнопкой питания и скопируйте журнал. Коды сопряжения, закрытые ключи и адреса действий не записываются.",
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,

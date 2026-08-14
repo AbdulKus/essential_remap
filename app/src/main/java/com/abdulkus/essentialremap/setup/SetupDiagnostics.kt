@@ -10,11 +10,10 @@ import java.time.Instant
 class SetupDiagnostics(context: Context) {
     private val appContext = context.applicationContext
     private val file = File(appContext.filesDir, FILE_NAME)
-    private val lock = Any()
 
     fun log(message: String) {
         runCatching {
-            synchronized(lock) {
+            synchronized(FILE_LOCK) {
                 if (file.length() > MAX_BYTES) file.delete()
                 file.appendText("${Instant.now()}  $message\n")
             }
@@ -22,7 +21,7 @@ class SetupDiagnostics(context: Context) {
     }
 
     fun report(): String = runCatching {
-        synchronized(lock) {
+        synchronized(FILE_LOCK) {
             val packageInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
             val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 packageInfo.longVersionCode
@@ -51,11 +50,12 @@ class SetupDiagnostics(context: Context) {
 
     fun clear() {
         runCatching {
-            synchronized(lock) { file.delete() }
+            synchronized(FILE_LOCK) { file.delete() }
         }
     }
 
     private companion object {
+        val FILE_LOCK = Any()
         const val FILE_NAME = "essential_key_setup.log"
         const val MAX_BYTES = 128 * 1024L
     }

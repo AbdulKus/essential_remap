@@ -8,6 +8,7 @@ import com.abdulkus.essentialremap.haptics.HapticEngine
 import com.abdulkus.essentialremap.platform.LaunchableAppsReader
 import com.abdulkus.essentialremap.platform.TorchController
 import com.abdulkus.essentialremap.setup.EssentialKeySetupCoordinator
+import com.abdulkus.essentialremap.setup.SetupDiagnostics
 
 class EssentialKeyApplication : Application() {
     lateinit var container: AppContainer
@@ -16,12 +17,15 @@ class EssentialKeyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val torchController = TorchController(this)
+        val diagnostics = SetupDiagnostics(this)
+        diagnostics.log("Runtime: application process started pid=${android.os.Process.myPid()}")
         container = AppContainer(
             repository = DataStoreSettingsRepository(this),
             hapticEngine = AndroidHapticEngine(this),
             torchController = torchController,
-            setupCoordinator = EssentialKeySetupCoordinator(this),
+            setupCoordinator = EssentialKeySetupCoordinator(this, diagnostics),
             launchableAppsReader = LaunchableAppsReader(this),
+            diagnostics = diagnostics,
         )
     }
 }
@@ -32,4 +36,5 @@ data class AppContainer(
     val torchController: TorchController,
     val setupCoordinator: EssentialKeySetupCoordinator,
     val launchableAppsReader: LaunchableAppsReader,
+    val diagnostics: SetupDiagnostics,
 )
