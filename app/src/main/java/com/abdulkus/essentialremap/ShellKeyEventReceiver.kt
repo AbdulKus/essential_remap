@@ -21,7 +21,7 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         } else {
             null
         }
-        if (senderUid != null && senderUid != Process.SHELL_UID) {
+        if (!ShellKeyEventSenderPolicy.isAllowed(senderUid)) {
             diagnostics.log("Runtime receiver: rejected sender uid=$senderUid")
             return
         }
@@ -46,7 +46,7 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         }
         val delivery = ShellKeyEventBus.publish(event)
         diagnostics.log(
-            "Runtime receiver: accepted source=shell uid=${senderUid ?: "manifest-permission"} " +
+            "Runtime receiver: accepted source=shell uid=${ShellKeyEventSenderPolicy.label(senderUid)} " +
                 "action=$action interactive=${event.interactive} repeat=${event.repeatCount} " +
                 "downTime=${event.downTimeNanos} delivery=$delivery",
         )
@@ -59,6 +59,22 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         private const val EXTRA_DOWN_TIME = "down_time"
         private const val EXTRA_REPEAT_COUNT = "repeat_count"
         private const val EXTRA_INTERACTIVE = "interactive"
+    }
+}
+
+/**
+ * Android 16 may return -1 for an `am broadcast` sender even though the manifest permission check
+ * has already authenticated shell. A concrete, non-shell UID is still rejected defensively.
+ */
+internal object ShellKeyEventSenderPolicy {
+    private const val UNAVAILABLE_UID = -1
+
+    fun isAllowed(uid: Int?): Boolean =
+        uid == null || uid == UNAVAILABLE_UID || uid == Process.SHELL_UID
+
+    fun label(uid: Int?): String = when (uid) {
+        null, UNAVAILABLE_UID -> "unavailable(DUMP-protected)"
+        else -> uid.toString()
     }
 }
 
