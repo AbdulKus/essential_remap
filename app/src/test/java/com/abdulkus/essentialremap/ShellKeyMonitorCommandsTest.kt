@@ -47,10 +47,22 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
+    fun monitorConvertsGeteventNanosToWindowManagerMillisOnlyForInteractiveLookup() {
+        val script = ShellKeyMonitorCommands.scriptForTesting()
+
+        assertTrue(script.contains("event_time_ms=${'$'}((event_time / 1000000))"))
+        assertTrue(script.contains("resolve_interactive \"${'$'}event_time_ms\""))
+        assertTrue(script.contains("downTime=${'$'}target_down_time_ms"))
+        assertTrue(script.contains("active_down_time=\"${'$'}event_time\""))
+        assertTrue(script.contains("send_event 0 \"${'$'}event_time\" \"${'$'}event_time\""))
+    }
+
+    @Test
     fun monitorReportsItsRawInputStateToAppDiagnostics() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
 
         assertTrue(script.contains("--es monitor_status"))
+        assertTrue(script.contains("eventTimeMs=${'$'}event_time_ms"))
         assertTrue(script.contains("false screen-off"))
         assertTrue(script.contains("true screen-off-release"))
         assertTrue(script.contains("state=unresolved"))
@@ -60,12 +72,13 @@ class ShellKeyMonitorCommandsTest {
     @Test
     fun installerStreamsPayloadThroughAHereDocument() {
         val installer = ShellKeyMonitorCommands.installSessionScript
+        val revision = ShellKeyMonitorCommands.REVISION
 
         assertTrue(installer.contains("ESSENTIAL_REMAP_MONITOR_EOF"))
         assertTrue(installer.contains("/system/bin/base64 -d"))
         assertTrue(installer.contains("key-monitor.sh.new"))
         assertTrue(installer.contains("/system/bin/sh -n"))
-        assertTrue(installer.contains("MONITOR_REVISION=4"))
+        assertTrue(installer.contains("MONITOR_REVISION=$revision"))
         assertTrue(installer.contains("/system/bin/mv -f"))
         assertTrue(installer.endsWith("exit\n"))
         assertTrue(ShellKeyMonitorCommands.INSTALL.length < 100)
@@ -73,8 +86,8 @@ class ShellKeyMonitorCommandsTest {
         assertFalse(ShellKeyMonitorCommands.INSTALL_SERVICE.startsWith("shell:"))
         assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.startsWith(ShellKeyMonitorCommands.START_OK))
         assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.startsWith(ShellKeyMonitorCommands.RUNNING))
-        assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.endsWith("revision=4"))
-        assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.endsWith("revision=4"))
+        assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.endsWith("revision=$revision"))
+        assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.endsWith("revision=$revision"))
 
         val payloadLines = installer
             .substringAfter("<<'ESSENTIAL_REMAP_MONITOR_EOF'\n")
