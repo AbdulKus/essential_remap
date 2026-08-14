@@ -9,14 +9,19 @@ import java.util.Base64
  */
 object ShellKeyMonitorCommands {
     const val INSTALL = "essential-remap-internal:install-shell-monitor"
+    const val INSTALL_SERVICE = "exec:/system/bin/sh"
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
+    const val START_CONFIRMATION = "essential-remap:shell-monitor-ok revision=3"
+    const val RUNNING_CONFIRMATION = "essential-remap:shell-monitor-running revision=3"
 
     private const val DIRECTORY = "/data/local/tmp/essential_remap"
     private const val SCRIPT = "$DIRECTORY/key-monitor.sh"
+    private const val TEMP_SCRIPT = "$DIRECTORY/key-monitor.sh.new"
     private const val PID_FILE = "$DIRECTORY/key-monitor.pid"
     private const val LOG_FILE = "$DIRECTORY/key-monitor.log"
+    private const val MONITOR_REVISION = 3
 
     private val monitorScript = """
         #!/system/bin/sh
@@ -24,6 +29,7 @@ object ShellKeyMonitorCommands {
         SCRIPT=$SCRIPT
         PID_FILE=$PID_FILE
         LOG_FILE=$LOG_FILE
+        MONITOR_REVISION=$MONITOR_REVISION
 
         monitor_is_running() {
           [ -s "${'$'}PID_FILE" ] || return 1
@@ -120,7 +126,7 @@ object ShellKeyMonitorCommands {
             echo "${'$'}monitor_pid" > "${'$'}PID_FILE"
             /system/bin/sleep 1
             if monitor_is_running; then
-              echo $START_OK
+              echo "$START_CONFIRMATION"
             else
               echo essential-remap:shell-monitor-failed
               [ -r "${'$'}LOG_FILE" ] && /system/bin/tail -n 20 "${'$'}LOG_FILE"
@@ -132,7 +138,7 @@ object ShellKeyMonitorCommands {
             echo $STOP_OK
             ;;
           status)
-            if monitor_is_running; then echo $RUNNING; else exit 1; fi
+            if monitor_is_running; then echo "$RUNNING_CONFIRMATION"; else exit 1; fi
             ;;
           run)
             run_monitor
@@ -141,28 +147,51 @@ object ShellKeyMonitorCommands {
         esac
     """.trimIndent() + "\n"
 
-    private val encodedScript: String = Base64.getEncoder().encodeToString(
+    private val encodedScriptSingleLine: String = Base64.getEncoder().encodeToString(
         monitorScript.toByteArray(Charsets.UTF_8),
     )
 
+    private val encodedScript: String = encodedScriptSingleLine.chunked(BASE64_LINE_LENGTH).joinToString("\n")
+
     /**
-     * Sent through an interactive shell's stdin. Keeping the Base64 payload out of the ADB service
-     * destination avoids the much smaller destination/command length limit on some adbd builds.
+     * Sent through a raw ADB exec service's stdin. The short Base64 lines avoid terminal line limits
+     * even if a vendor adbd unexpectedly applies line discipline. A validated temporary file is
+     * atomically moved into place so an interrupted transfer cannot leave a partial monitor script.
      */
-    val installSessionScript: String = """
-        /system/bin/mkdir -p $DIRECTORY || exit 1
-        if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi
-        /system/bin/base64 -d > $SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'
-        $encodedScript
-        ESSENTIAL_REMAP_MONITOR_EOF
-        /system/bin/chmod 700 $SCRIPT && /system/bin/sh $SCRIPT start
-        exit
-    """.trimIndent() + "\n"
+    val installSessionScript: String = buildString {
+        appendLine("/system/bin/mkdir -p $DIRECTORY || exit 1")
+        appendLine("/system/bin/rm -f $TEMP_SCRIPT")
+        appendLine("/system/bin/base64 -d > $TEMP_SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'")
+        appendLine(encodedScript)
+        appendLine("ESSENTIAL_REMAP_MONITOR_EOF")
+        appendLine("decode_status=${'$'}?")
+        appendLine("if [ \"${'$'}decode_status\" -ne 0 ]; then")
+        appendLine("  echo essential-remap:shell-monitor-decode-failed")
+        appendLine("  /system/bin/rm -f $TEMP_SCRIPT")
+        appendLine("  exit 1")
+        appendLine("fi")
+        appendLine(
+            "if ! /system/bin/sh -n $TEMP_SCRIPT || " +
+                "! /system/bin/grep -F 'MONITOR_REVISION=$MONITOR_REVISION' " +
+                "$TEMP_SCRIPT >/dev/null 2>&1; then",
+        )
+        appendLine("  echo essential-remap:shell-monitor-validation-failed")
+        appendLine("  /system/bin/rm -f $TEMP_SCRIPT")
+        appendLine("  exit 1")
+        appendLine("fi")
+        appendLine("if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi")
+        appendLine(
+            "/system/bin/chmod 700 $TEMP_SCRIPT && " +
+                "/system/bin/mv -f $TEMP_SCRIPT $SCRIPT || exit 1",
+        )
+        appendLine("/system/bin/sh $SCRIPT start")
+        appendLine("exit")
+    }
 
     val installAndStart: String =
         "mkdir -p $DIRECTORY || exit 1; " +
             "if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi; " +
-            "printf %s $encodedScript | base64 -d > $SCRIPT && " +
+            "printf %s $encodedScriptSingleLine | base64 -d > $SCRIPT && " +
             "chmod 700 $SCRIPT && /system/bin/sh $SCRIPT start"
 
     const val stop: String = "/system/bin/sh $SCRIPT stop"
@@ -176,4 +205,6 @@ object ShellKeyMonitorCommands {
     ).joinToString("\n")
 
     internal fun scriptForTesting(): String = monitorScript
+
+    private const val BASE64_LINE_LENGTH = 76
 }
