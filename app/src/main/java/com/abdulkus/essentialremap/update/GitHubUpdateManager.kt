@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import com.abdulkus.essentialremap.BuildConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -38,6 +37,10 @@ sealed interface UpdatePromptState {
 
 class GitHubUpdateManager(context: Context) {
     private val appContext = context.applicationContext
+    private val installedVersionName: String by lazy {
+        @Suppress("DEPRECATION")
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "0"
+    }
 
     suspend fun checkForUpdate(): GitHubRelease? = withContext(Dispatchers.IO) {
         val connection = openConnection(LATEST_RELEASE_API)
@@ -48,7 +51,7 @@ class GitHubUpdateManager(context: Context) {
             if (json.optBoolean("draft", false) || json.optBoolean("prerelease", false)) return@withContext null
 
             val tag = json.optString("tag_name").trim()
-            if (!UpdatePolicy.isNewerVersion(tag, BuildConfig.VERSION_NAME)) return@withContext null
+            if (!UpdatePolicy.isNewerVersion(tag, installedVersionName)) return@withContext null
 
             val assets = json.optJSONArray("assets") ?: return@withContext null
             var apkUrl: String? = null
@@ -188,7 +191,7 @@ class GitHubUpdateManager(context: Context) {
             instanceFollowRedirects = true
             requestMethod = "GET"
             setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "Essential-Remap/${BuildConfig.VERSION_NAME}")
+            setRequestProperty("User-Agent", "Essential-Remap/$installedVersionName")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
         }
 
