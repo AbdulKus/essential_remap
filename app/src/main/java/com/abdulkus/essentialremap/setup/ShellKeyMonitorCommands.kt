@@ -13,7 +13,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 6
+    const val REVISION = 7
     const val START_CONFIRMATION = "essential-remap:shell-monitor-ok revision=" + REVISION
     const val RUNNING_CONFIRMATION = "essential-remap:shell-monitor-running revision=" + REVISION
 
@@ -21,6 +21,7 @@ object ShellKeyMonitorCommands {
     private const val SCRIPT = "$DIRECTORY/key-monitor.sh"
     private const val TEMP_SCRIPT = "$DIRECTORY/key-monitor.sh.new"
     private const val INSTALLER_SCRIPT = "$DIRECTORY/install-monitor.sh"
+    private const val INSTALL_LOG = "$DIRECTORY/install-monitor.log"
     private const val PID_FILE = "$DIRECTORY/key-monitor.pid"
     private const val STATE_FILE = "$DIRECTORY/key-monitor.state"
     private const val LOG_FILE = "$DIRECTORY/key-monitor.log"
@@ -51,14 +52,11 @@ object ShellKeyMonitorCommands {
         is_monitor_pid() {
           candidate_pid="${'$'}1"
           case "${'$'}candidate_pid" in ''|*[!0-9]*) return 1 ;; esac
-          [ -r "/proc/${'$'}candidate_pid/cmdline" ] || return 1
-          candidate_cmd="${'$'}(
-            /system/bin/tr '\000' ' ' < "/proc/${'$'}candidate_pid/cmdline" 2>/dev/null
-          )"
-          case "${'$'}candidate_cmd" in
-            *"${'$'}SCRIPT"*' run'*) return 0 ;;
-          esac
-          return 1
+          candidate_cmdline="/proc/${'$'}candidate_pid/cmdline"
+          [ -r "${'$'}candidate_cmdline" ] || return 1
+          /system/bin/grep -aF "${'$'}SCRIPT" "${'$'}candidate_cmdline" >/dev/null 2>&1 || return 1
+          /system/bin/grep -aF 'run' "${'$'}candidate_cmdline" >/dev/null 2>&1 || return 1
+          return 0
         }
 
         monitor_pids() {
@@ -70,14 +68,6 @@ object ShellKeyMonitorCommands {
               echo "${'$'}candidate_pid"
             fi
           done
-        }
-
-        monitor_count() {
-          count=0
-          for candidate_pid in ${'$'}(monitor_pids); do
-            count=${'$'}((count + 1))
-          done
-          echo "${'$'}count"
         }
 
         kill_tree() {
@@ -95,6 +85,7 @@ object ShellKeyMonitorCommands {
 
         stop_all_monitors() {
           stale_pids="${'$'}(monitor_pids)"
+          log_monitor "cleanup begin revision=${'$'}MONITOR_REVISION stalePids=${'$'}{stale_pids:-none}"
           for stale_pid in ${'$'}stale_pids; do
             log_monitor "cleanup stale-monitor pid=${'$'}stale_pid"
             kill_tree "${'$'}stale_pid"
@@ -106,12 +97,20 @@ object ShellKeyMonitorCommands {
           done
           remaining="${'$'}(monitor_pids)"
           if [ -n "${'$'}remaining" ]; then
+            log_monitor "cleanup force-kill pids=${'$'}remaining"
             for stale_pid in ${'$'}remaining; do
               /system/bin/kill -9 "${'$'}stale_pid" >/dev/null 2>&1
             done
-            /system/bin/sleep 0.1
+            /system/bin/sleep 0.2
           fi
+          remaining="${'$'}(monitor_pids)"
           /system/bin/rm -f "${'$'}PID_FILE" "${'$'}STATE_FILE"
+          if [ -n "${'$'}remaining" ]; then
+            log_monitor "cleanup failed remainingPids=${'$'}remaining"
+            return 1
+          fi
+          log_monitor "cleanup complete"
+          return 0
         }
 
         monitor_is_running() {
@@ -137,7 +136,7 @@ object ShellKeyMonitorCommands {
           for candidate in /dev/input/event*; do
             [ -c "${'$'}candidate" ] || continue
             if /system/bin/getevent -pl "${'$'}candidate" 2>/dev/null |
-              /system/bin/grep -F '"gpio-keys"' >/dev/null 2>&1; then
+              /system/bin/grep -F '\"gpio-keys\"' >/dev/null 2>&1; then
               echo "${'$'}candidate"
               return 0
             fi
@@ -279,7 +278,11 @@ object ShellKeyMonitorCommands {
           start)
             /system/bin/mkdir -p "${'$'}DIR"
             : > "${'$'}LOG_FILE"
-            stop_all_monitors
+            if ! stop_all_monitors; then
+              echo essential-remap:shell-monitor-cleanup-failed
+              [ -r "${'$'}LOG_FILE" ] && /system/bin/tail -n 30 "${'$'}LOG_FILE"
+              exit 1
+            fi
             if command -v nohup >/dev/null 2>&1; then
               if command -v setsid >/dev/null 2>&1; then
                 /system/bin/nohup setsid /system/bin/sh "${'$'}SCRIPT" run </dev/null >/dev/null 2>&1 &
@@ -291,10 +294,11 @@ object ShellKeyMonitorCommands {
             fi
             wait_count=0
             while [ "${'$'}wait_count" -lt 30 ]; do
-              if monitor_is_running && [ "${'$'}(monitor_count)" -eq 1 ] && [ -s "${'$'}STATE_FILE" ]; then
+              if monitor_is_running && [ -s "${'$'}STATE_FILE" ]; then
                 monitor_state="${'$'}(/system/bin/cat "${'$'}STATE_FILE" 2>/dev/null)"
                 case "${'$'}monitor_state" in
                   "revision=${'$'}MONITOR_REVISION "*)
+                    log_monitor "start confirmed ${'$'}monitor_state"
                     echo "$START_CONFIRMATION ${'$'}{monitor_state#revision=${'$'}MONITOR_REVISION }"
                     exit 0
                     ;;
@@ -310,10 +314,16 @@ object ShellKeyMonitorCommands {
             ;;
           stop)
             stop_all_monitors
-            echo $STOP_OK
+            stop_status=${'$'}?
+            if [ "${'$'}stop_status" -eq 0 ]; then
+              echo $STOP_OK
+            else
+              echo essential-remap:shell-monitor-stop-failed
+            fi
+            exit "${'$'}stop_status"
             ;;
           status)
-            if monitor_is_running && [ "${'$'}(monitor_count)" -eq 1 ] && [ -s "${'$'}STATE_FILE" ]; then
+            if monitor_is_running && [ -s "${'$'}STATE_FILE" ]; then
               monitor_state="${'$'}(/system/bin/cat "${'$'}STATE_FILE" 2>/dev/null)"
               case "${'$'}monitor_state" in
                 "revision=${'$'}MONITOR_REVISION "*)
@@ -322,7 +332,7 @@ object ShellKeyMonitorCommands {
                   ;;
               esac
             fi
-            echo "essential-remap:shell-monitor-not-running revision=${'$'}MONITOR_REVISION count=${'$'}(monitor_count)"
+            echo "essential-remap:shell-monitor-not-running revision=${'$'}MONITOR_REVISION"
             exit 1
             ;;
           run)
@@ -343,12 +353,16 @@ object ShellKeyMonitorCommands {
      * so vendor ADB shells cannot echo or line-edit the script while it is being transferred.
      */
     val installSessionScript: String = buildString {
+        appendLine("INSTALL_LOG=$INSTALL_LOG")
+        appendLine("log_install() { echo \"$(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) $*\" >> \"$INSTALL_LOG\"; }")
+        appendLine("log_install 'stage=installer-start revision=$MONITOR_REVISION'")
         appendLine("/system/bin/mkdir -p $DIRECTORY || exit 1")
         appendLine("/system/bin/rm -f $TEMP_SCRIPT")
         appendLine("/system/bin/base64 -d > $TEMP_SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'")
         appendLine(encodedScript)
         appendLine("ESSENTIAL_REMAP_MONITOR_EOF")
         appendLine("decode_status=${'$'}?")
+        appendLine("log_install \"stage=decode status=${'$'}decode_status\"")
         appendLine("if [ \"${'$'}decode_status\" -ne 0 ]; then")
         appendLine("  echo essential-remap:shell-monitor-decode-failed")
         appendLine("  /system/bin/rm -f $TEMP_SCRIPT")
@@ -359,42 +373,54 @@ object ShellKeyMonitorCommands {
                 "! /system/bin/grep -F 'MONITOR_REVISION=$MONITOR_REVISION' " +
                 "$TEMP_SCRIPT >/dev/null 2>&1; then",
         )
+        appendLine("  log_install 'stage=validate status=failed'")
         appendLine("  echo essential-remap:shell-monitor-validation-failed")
         appendLine("  /system/bin/rm -f $TEMP_SCRIPT")
         appendLine("  exit 1")
         appendLine("fi")
-        appendLine("if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi")
+        appendLine("log_install 'stage=validate status=ok'")
         appendLine(
             "/system/bin/chmod 700 $TEMP_SCRIPT && " +
                 "/system/bin/mv -f $TEMP_SCRIPT $SCRIPT || exit 1",
         )
-        appendLine("/system/bin/sh $SCRIPT start")
-        appendLine("exit")
+        appendLine("log_install 'stage=script-installed revision=$MONITOR_REVISION'")
+        appendLine("start_output=\"$(/system/bin/sh $SCRIPT start 2>&1)\"")
+        appendLine("start_status=${'$'}?")
+        appendLine("printf '%s\\n' \"${'$'}start_output\" >> \"${'$'}INSTALL_LOG\"")
+        appendLine("printf '%s\\n' \"${'$'}start_output\"")
+        appendLine("log_install \"stage=start status=${'$'}start_status\"")
+        appendLine("exit \"${'$'}start_status\"")
     }
 
     /**
-     * ADB exec always launches a non-interactive command, but some vendor/library combinations still
-     * expose terminal-like echo/line editing when a bare sh reads commands from stdin. Read exactly
-     * the payload byte count into a file instead. The stty call is a harmless extra guard if a PTY is
-     * unexpectedly present; dd itself stops after the known byte count and does not need EOF.
+     * Read exactly the installer payload byte count into a file before executing it. This avoids
+     * interactive-shell echo/line editing on vendor adbd implementations and does not depend on EOF.
      */
     val INSTALL_SERVICE: String = buildString {
         val payloadBytes = installSessionScript.toByteArray(Charsets.UTF_8).size
         append("exec:")
         append("/system/bin/mkdir -p $DIRECTORY && ")
+        append(": > $INSTALL_LOG; ")
+        append("echo 'transport stage=receive bytes=$payloadBytes' >> $INSTALL_LOG; ")
         append("(/system/bin/stty raw -echo 2>/dev/null || true); ")
-        append("/system/bin/dd bs=1 count=$payloadBytes of=$INSTALLER_SCRIPT 2>/dev/null && ")
+        append("/system/bin/dd bs=1 count=$payloadBytes of=$INSTALLER_SCRIPT 2>>$INSTALL_LOG; ")
+        append("transport_status=${'$'}?; ")
+        append("echo \"transport stage=dd status=${'$'}transport_status\" >> $INSTALL_LOG; ")
+        append("if [ \"${'$'}transport_status\" -ne 0 ]; then ")
+        append("echo essential-remap:shell-monitor-transport-failed; ")
+        append("/system/bin/cat $INSTALL_LOG; ")
+        append("/system/bin/rm -f $INSTALLER_SCRIPT; exit \"${'$'}transport_status\"; fi; ")
         append("/system/bin/sh $INSTALLER_SCRIPT; ")
         append("installer_status=${'$'}?; ")
+        append("echo \"transport stage=installer status=${'$'}installer_status\" >> $INSTALL_LOG; ")
         append("/system/bin/rm -f $INSTALLER_SCRIPT; ")
         append("exit ${'$'}installer_status")
     }
 
     val installAndStart: String =
         "mkdir -p $DIRECTORY || exit 1; " +
-            "if [ -x $SCRIPT ]; then /system/bin/sh $SCRIPT stop >/dev/null 2>&1; fi; " +
-            "printf %s $encodedScriptSingleLine | base64 -d > $SCRIPT && " +
-            "chmod 700 $SCRIPT && /system/bin/sh $SCRIPT start"
+            "printf %s $encodedScriptSingleLine | base64 -d > $TEMP_SCRIPT && " +
+            "chmod 700 $TEMP_SCRIPT && mv -f $TEMP_SCRIPT $SCRIPT && /system/bin/sh $SCRIPT start"
 
     const val stop: String = "/system/bin/sh $SCRIPT stop"
     const val status: String = "/system/bin/sh $SCRIPT status"
