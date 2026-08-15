@@ -10,7 +10,6 @@ import java.util.Base64
  */
 object ShellKeyMonitorCommands {
     const val INSTALL = "essential-remap-internal:install-shell-monitor"
-    const val INSTALL_SERVICE = "exec:/system/bin/sh"
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
@@ -21,6 +20,7 @@ object ShellKeyMonitorCommands {
     private const val DIRECTORY = "/data/local/tmp/essential_remap"
     private const val SCRIPT = "$DIRECTORY/key-monitor.sh"
     private const val TEMP_SCRIPT = "$DIRECTORY/key-monitor.sh.new"
+    private const val INSTALLER_SCRIPT = "$DIRECTORY/install-monitor.sh"
     private const val PID_FILE = "$DIRECTORY/key-monitor.pid"
     private const val STATE_FILE = "$DIRECTORY/key-monitor.state"
     private const val LOG_FILE = "$DIRECTORY/key-monitor.log"
@@ -339,9 +339,8 @@ object ShellKeyMonitorCommands {
     private val encodedScript: String = encodedScriptSingleLine.chunked(BASE64_LINE_LENGTH).joinToString("\n")
 
     /**
-     * Sent through a raw ADB exec service's stdin. The short Base64 lines avoid terminal line limits
-     * even if a vendor adbd unexpectedly applies line discipline. A validated temporary file is
-     * atomically moved into place so an interrupted transfer cannot leave a partial monitor script.
+     * Installer payload. It is first staged as inert bytes by INSTALL_SERVICE and only then executed,
+     * so vendor ADB shells cannot echo or line-edit the script while it is being transferred.
      */
     val installSessionScript: String = buildString {
         appendLine("/system/bin/mkdir -p $DIRECTORY || exit 1")
@@ -371,6 +370,24 @@ object ShellKeyMonitorCommands {
         )
         appendLine("/system/bin/sh $SCRIPT start")
         appendLine("exit")
+    }
+
+    /**
+     * ADB exec always launches a non-interactive command, but some vendor/library combinations still
+     * expose terminal-like echo/line editing when a bare sh reads commands from stdin. Read exactly
+     * the payload byte count into a file instead. The stty call is a harmless extra guard if a PTY is
+     * unexpectedly present; dd itself stops after the known byte count and does not need EOF.
+     */
+    val INSTALL_SERVICE: String = buildString {
+        val payloadBytes = installSessionScript.toByteArray(Charsets.UTF_8).size
+        append("exec:")
+        append("/system/bin/mkdir -p $DIRECTORY && ")
+        append("(/system/bin/stty raw -echo 2>/dev/null || true); ")
+        append("/system/bin/dd bs=1 count=$payloadBytes of=$INSTALLER_SCRIPT 2>/dev/null && ")
+        append("/system/bin/sh $INSTALLER_SCRIPT; ")
+        append("installer_status=${'$'}?; ")
+        append("/system/bin/rm -f $INSTALLER_SCRIPT; ")
+        append("exit ${'$'}installer_status")
     }
 
     val installAndStart: String =
