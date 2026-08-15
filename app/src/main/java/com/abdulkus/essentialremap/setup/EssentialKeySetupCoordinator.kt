@@ -263,8 +263,10 @@ class EssentialKeySetupCoordinator(
                 }
             }
         }
-        diagnostics.log("Wireless debugging did not become connectable with stored key; pairing fallback")
-        return null
+        diagnostics.log("Wireless debugging did not become connectable with stored key")
+        throw IOException(
+            "Wireless debugging is not available with the saved key. Turn it on and try again.",
+        )
     }
 
     private suspend fun applyConnectedOperation(

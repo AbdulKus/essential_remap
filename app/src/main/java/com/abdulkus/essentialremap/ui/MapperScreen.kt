@@ -1562,6 +1562,7 @@ private fun packageStatusTitle(language: AppLanguage, status: NothingPackageStat
 private fun setupPhaseTitle(language: AppLanguage, phase: SetupPhase): String = when (phase) {
     SetupPhase.IDLE -> language.t("Ready", "Готово")
     SetupPhase.DISCOVERING -> language.t("Finding Wireless ADB", "Поиск Wireless ADB")
+    SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING -> language.t("Enable Wireless debugging", "Включите Wireless debugging")
     SetupPhase.WAITING_FOR_CODE -> language.t("Enter the pairing code", "Введите код сопряжения")
     SetupPhase.PAIRING -> language.t("Pairing with Android", "Сопряжение с Android")
     SetupPhase.CONNECTING -> language.t("Connecting", "Подключение")

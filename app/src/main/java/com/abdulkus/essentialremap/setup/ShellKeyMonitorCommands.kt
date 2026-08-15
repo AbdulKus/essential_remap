@@ -393,8 +393,7 @@ object ShellKeyMonitorCommands {
             add("adb shell settings put secure nt_block_essential_key 1")
             add("adb shell \"$installAndStart\"")
         }
-    }.joinToString("
-")
+    }.joinToString("\n")
 
     internal fun scriptForTesting(): String = monitorScript
     private const val BASE64_LINE_LENGTH = 76
