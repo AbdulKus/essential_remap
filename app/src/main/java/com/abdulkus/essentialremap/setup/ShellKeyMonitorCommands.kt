@@ -2,20 +2,15 @@ package com.abdulkus.essentialremap.setup
 
 import java.util.Base64
 
-/**
- * Installs a tiny, non-root monitor under Android's shell UID. It blocks directly on the Essential
- * Key's Linux input device while idle and deliberately takes no wake lock while waiting. Nothing OS
- * is configured to block its own screen-off Essential Key wake path, so the monitor can classify the
- * pre-existing power state without racing the vendor wake-up handler.
- */
+/** Shell-UID monitor for the Nothing Essential Key while the display is off. */
 object ShellKeyMonitorCommands {
     const val INSTALL = "essential-remap-internal:install-shell-monitor"
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
     const val REVISION = 7
-    const val START_CONFIRMATION = "essential-remap:shell-monitor-ok revision=" + REVISION
-    const val RUNNING_CONFIRMATION = "essential-remap:shell-monitor-running revision=" + REVISION
+    const val START_CONFIRMATION = "$START_OK revision=$REVISION"
+    const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
     private const val DIRECTORY = "/data/local/tmp/essential_remap"
     private const val SCRIPT = "$DIRECTORY/key-monitor.sh"
@@ -25,7 +20,6 @@ object ShellKeyMonitorCommands {
     private const val PID_FILE = "$DIRECTORY/key-monitor.pid"
     private const val STATE_FILE = "$DIRECTORY/key-monitor.state"
     private const val LOG_FILE = "$DIRECTORY/key-monitor.log"
-    private const val MONITOR_REVISION = REVISION
 
     private val monitorScript = """
         #!/system/bin/sh
@@ -34,18 +28,10 @@ object ShellKeyMonitorCommands {
         PID_FILE=$PID_FILE
         STATE_FILE=$STATE_FILE
         LOG_FILE=$LOG_FILE
-        MONITOR_REVISION=$MONITOR_REVISION
+        MONITOR_REVISION=$REVISION
         INPUT_DEVICE=
 
         log_monitor() {
-          if [ -f "${'$'}LOG_FILE" ]; then
-            log_size="${'$'}(/system/bin/wc -c < "${'$'}LOG_FILE" 2>/dev/null)"
-            case "${'$'}log_size" in ''|*[!0-9]*) log_size=0 ;; esac
-            if [ "${'$'}log_size" -gt 131072 ]; then
-              /system/bin/tail -n 256 "${'$'}LOG_FILE" > "${'$'}LOG_FILE.tmp" 2>/dev/null &&
-                /system/bin/mv -f "${'$'}LOG_FILE.tmp" "${'$'}LOG_FILE"
-            fi
-          fi
           echo "${'$'}(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ${'$'}*" >> "${'$'}LOG_FILE"
         }
 
@@ -64,9 +50,7 @@ object ShellKeyMonitorCommands {
             [ -d "${'$'}proc_dir" ] || continue
             candidate_pid="${'$'}{proc_dir#/proc/}"
             [ "${'$'}candidate_pid" = "${'$'}${'$'}" ] && continue
-            if is_monitor_pid "${'$'}candidate_pid"; then
-              echo "${'$'}candidate_pid"
-            fi
+            is_monitor_pid "${'$'}candidate_pid" && echo "${'$'}candidate_pid"
           done
         }
 
@@ -87,7 +71,6 @@ object ShellKeyMonitorCommands {
           stale_pids="${'$'}(monitor_pids)"
           log_monitor "cleanup begin revision=${'$'}MONITOR_REVISION stalePids=${'$'}{stale_pids:-none}"
           for stale_pid in ${'$'}stale_pids; do
-            log_monitor "cleanup stale-monitor pid=${'$'}stale_pid"
             kill_tree "${'$'}stale_pid"
           done
           wait_count=0
@@ -136,7 +119,7 @@ object ShellKeyMonitorCommands {
           for candidate in /dev/input/event*; do
             [ -c "${'$'}candidate" ] || continue
             if /system/bin/getevent -pl "${'$'}candidate" 2>/dev/null |
-              /system/bin/grep -F '\"gpio-keys\"' >/dev/null 2>&1; then
+              /system/bin/grep -F 'gpio-keys' >/dev/null 2>&1; then
               echo "${'$'}candidate"
               return 0
             fi
@@ -169,10 +152,7 @@ object ShellKeyMonitorCommands {
         }
 
         resolve_interactive() {
-          wakefulness="${'$'}(
-            /system/bin/dumpsys power 2>/dev/null |
-              /system/bin/grep -m 1 'mWakefulness='
-          )"
+          wakefulness="${'$'}(/system/bin/dumpsys power 2>/dev/null | /system/bin/grep -m 1 'mWakefulness=')"
           case "${'$'}wakefulness" in
             *Asleep*|*Dozing*) echo false; return 0 ;;
             *Awake*) echo true; return 0 ;;
@@ -194,9 +174,7 @@ object ShellKeyMonitorCommands {
             ?) event_micros="${'$'}{event_micros}00000" ;;
             *) return 1 ;;
           esac
-          case "${'$'}event_seconds${'$'}event_micros" in
-            ''|*[!0-9]*) return 1 ;;
-          esac
+          case "${'$'}event_seconds${'$'}event_micros" in ''|*[!0-9]*) return 1 ;; esac
           event_millis_fraction="${'$'}{event_micros%???}"
           echo "${'$'}event_seconds${'$'}event_micros"000 "${'$'}event_seconds${'$'}event_millis_fraction"
         }
@@ -217,9 +195,7 @@ object ShellKeyMonitorCommands {
           active_down_time=
           /system/bin/getevent -t "${'$'}INPUT_DEVICE" 2>&1 | while IFS= read -r line; do
             event_payload="${'$'}{line#*] }"
-            case "${'$'}event_payload" in
-              /dev/input/*': '*) event_payload="${'$'}{event_payload#*: }" ;;
-            esac
+            case "${'$'}event_payload" in /dev/input/*': '*) event_payload="${'$'}{event_payload#*: }" ;; esac
             set -- ${'$'}event_payload
             [ "${'$'}#" -ge 3 ] || continue
             event_type="${'$'}1"
@@ -229,7 +205,6 @@ object ShellKeyMonitorCommands {
               0001:00fa|0001:00FA|0001:00Fa|0001:00fA) ;;
               *) continue ;;
             esac
-
             timestamp_part="${'$'}{line#*[}"
             timestamp_part="${'$'}{timestamp_part%%]*}"
             set -- ${'$'}timestamp_part
@@ -240,7 +215,6 @@ object ShellKeyMonitorCommands {
             event_time="${'$'}1"
             event_time_ms="${'$'}2"
             log_monitor "raw input=${'$'}INPUT_DEVICE type=${'$'}event_type code=${'$'}event_code value=${'$'}event_value eventTime=${'$'}event_time eventTimeMs=${'$'}event_time_ms"
-
             case "${'$'}event_value" in
               00000001)
                 interactive="${'$'}(resolve_interactive)"
@@ -280,7 +254,7 @@ object ShellKeyMonitorCommands {
             : > "${'$'}LOG_FILE"
             if ! stop_all_monitors; then
               echo essential-remap:shell-monitor-cleanup-failed
-              [ -r "${'$'}LOG_FILE" ] && /system/bin/tail -n 30 "${'$'}LOG_FILE"
+              /system/bin/tail -n 30 "${'$'}LOG_FILE" 2>/dev/null
               exit 1
             fi
             if command -v nohup >/dev/null 2>&1; then
@@ -308,18 +282,14 @@ object ShellKeyMonitorCommands {
               wait_count=${'$'}((wait_count + 1))
             done
             echo essential-remap:shell-monitor-failed
-            [ -r "${'$'}LOG_FILE" ] && /system/bin/tail -n 30 "${'$'}LOG_FILE"
+            /system/bin/tail -n 30 "${'$'}LOG_FILE" 2>/dev/null
             stop_all_monitors
             exit 1
             ;;
           stop)
             stop_all_monitors
             stop_status=${'$'}?
-            if [ "${'$'}stop_status" -eq 0 ]; then
-              echo $STOP_OK
-            else
-              echo essential-remap:shell-monitor-stop-failed
-            fi
+            if [ "${'$'}stop_status" -eq 0 ]; then echo $STOP_OK; else echo essential-remap:shell-monitor-stop-failed; fi
             exit "${'$'}stop_status"
             ;;
           status)
@@ -335,27 +305,20 @@ object ShellKeyMonitorCommands {
             echo "essential-remap:shell-monitor-not-running revision=${'$'}MONITOR_REVISION"
             exit 1
             ;;
-          run)
-            run_monitor
-            ;;
+          run) run_monitor ;;
           *) exit 2 ;;
         esac
     """.trimIndent() + "\n"
 
-    private val encodedScriptSingleLine: String = Base64.getEncoder().encodeToString(
+    private val encodedScriptSingleLine = Base64.getEncoder().encodeToString(
         monitorScript.toByteArray(Charsets.UTF_8),
     )
+    private val encodedScript = encodedScriptSingleLine.chunked(BASE64_LINE_LENGTH).joinToString("\n")
 
-    private val encodedScript: String = encodedScriptSingleLine.chunked(BASE64_LINE_LENGTH).joinToString("\n")
-
-    /**
-     * Installer payload. It is first staged as inert bytes by INSTALL_SERVICE and only then executed,
-     * so vendor ADB shells cannot echo or line-edit the script while it is being transferred.
-     */
     val installSessionScript: String = buildString {
         appendLine("INSTALL_LOG=$INSTALL_LOG")
-        appendLine("log_install() { echo \"$(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) $*\" >> \"$INSTALL_LOG\"; }")
-        appendLine("log_install 'stage=installer-start revision=$MONITOR_REVISION'")
+        appendLine("log_install() { echo \"$(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ${'$'}*\" >> \"${'$'}INSTALL_LOG\"; }")
+        appendLine("log_install 'stage=installer-start revision=$REVISION'")
         appendLine("/system/bin/mkdir -p $DIRECTORY || exit 1")
         appendLine("/system/bin/rm -f $TEMP_SCRIPT")
         appendLine("/system/bin/base64 -d > $TEMP_SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'")
@@ -363,15 +326,10 @@ object ShellKeyMonitorCommands {
         appendLine("ESSENTIAL_REMAP_MONITOR_EOF")
         appendLine("decode_status=${'$'}?")
         appendLine("log_install \"stage=decode status=${'$'}decode_status\"")
-        appendLine("if [ \"${'$'}decode_status\" -ne 0 ]; then")
-        appendLine("  echo essential-remap:shell-monitor-decode-failed")
-        appendLine("  /system/bin/rm -f $TEMP_SCRIPT")
-        appendLine("  exit 1")
-        appendLine("fi")
+        appendLine("if [ \"${'$'}decode_status\" -ne 0 ]; then echo essential-remap:shell-monitor-decode-failed; exit 1; fi")
         appendLine(
             "if ! /system/bin/sh -n $TEMP_SCRIPT || " +
-                "! /system/bin/grep -F 'MONITOR_REVISION=$MONITOR_REVISION' " +
-                "$TEMP_SCRIPT >/dev/null 2>&1; then",
+                "! /system/bin/grep -F 'MONITOR_REVISION=$REVISION' $TEMP_SCRIPT >/dev/null 2>&1; then",
         )
         appendLine("  log_install 'stage=validate status=failed'")
         appendLine("  echo essential-remap:shell-monitor-validation-failed")
@@ -379,11 +337,8 @@ object ShellKeyMonitorCommands {
         appendLine("  exit 1")
         appendLine("fi")
         appendLine("log_install 'stage=validate status=ok'")
-        appendLine(
-            "/system/bin/chmod 700 $TEMP_SCRIPT && " +
-                "/system/bin/mv -f $TEMP_SCRIPT $SCRIPT || exit 1",
-        )
-        appendLine("log_install 'stage=script-installed revision=$MONITOR_REVISION'")
+        appendLine("/system/bin/chmod 700 $TEMP_SCRIPT && /system/bin/mv -f $TEMP_SCRIPT $SCRIPT || exit 1")
+        appendLine("log_install 'stage=script-installed revision=$REVISION'")
         appendLine("start_output=\"$(/system/bin/sh $SCRIPT start 2>&1)\"")
         appendLine("start_status=${'$'}?")
         appendLine("printf '%s\\n' \"${'$'}start_output\" >> \"${'$'}INSTALL_LOG\"")
@@ -392,14 +347,9 @@ object ShellKeyMonitorCommands {
         appendLine("exit \"${'$'}start_status\"")
     }
 
-    /**
-     * Read exactly the installer payload byte count into a file before executing it. This avoids
-     * interactive-shell echo/line editing on vendor adbd implementations and does not depend on EOF.
-     */
     val INSTALL_SERVICE: String = buildString {
         val payloadBytes = installSessionScript.toByteArray(Charsets.UTF_8).size
-        append("exec:")
-        append("/system/bin/mkdir -p $DIRECTORY && ")
+        append("exec:/system/bin/mkdir -p $DIRECTORY && ")
         append(": > $INSTALL_LOG; ")
         append("echo 'transport stage=receive bytes=$payloadBytes' >> $INSTALL_LOG; ")
         append("(/system/bin/stty raw -echo 2>/dev/null || true); ")
@@ -407,14 +357,11 @@ object ShellKeyMonitorCommands {
         append("transport_status=${'$'}?; ")
         append("echo \"transport stage=dd status=${'$'}transport_status\" >> $INSTALL_LOG; ")
         append("if [ \"${'$'}transport_status\" -ne 0 ]; then ")
-        append("echo essential-remap:shell-monitor-transport-failed; ")
-        append("/system/bin/cat $INSTALL_LOG; ")
+        append("echo essential-remap:shell-monitor-transport-failed; /system/bin/cat $INSTALL_LOG; ")
         append("/system/bin/rm -f $INSTALLER_SCRIPT; exit \"${'$'}transport_status\"; fi; ")
-        append("/system/bin/sh $INSTALLER_SCRIPT; ")
-        append("installer_status=${'$'}?; ")
+        append("/system/bin/sh $INSTALLER_SCRIPT; installer_status=${'$'}?; ")
         append("echo \"transport stage=installer status=${'$'}installer_status\" >> $INSTALL_LOG; ")
-        append("/system/bin/rm -f $INSTALLER_SCRIPT; ")
-        append("exit ${'$'}installer_status")
+        append("/system/bin/rm -f $INSTALLER_SCRIPT; exit ${'$'}installer_status")
     }
 
     val installAndStart: String =
@@ -422,8 +369,8 @@ object ShellKeyMonitorCommands {
             "printf %s $encodedScriptSingleLine | base64 -d > $TEMP_SCRIPT && " +
             "chmod 700 $TEMP_SCRIPT && mv -f $TEMP_SCRIPT $SCRIPT && /system/bin/sh $SCRIPT start"
 
-    const val stop: String = "/system/bin/sh $SCRIPT stop"
-    const val status: String = "/system/bin/sh $SCRIPT status"
+    const val stop = "/system/bin/sh $SCRIPT stop"
+    const val status = "/system/bin/sh $SCRIPT status"
 
     fun manualAdbCommands(): String = listOf(
         "adb shell pm disable-user --user 0 ${NothingPackageCommands.ESSENTIAL_SPACE}",
@@ -433,6 +380,5 @@ object ShellKeyMonitorCommands {
     ).joinToString("\n")
 
     internal fun scriptForTesting(): String = monitorScript
-
     private const val BASE64_LINE_LENGTH = 76
 }
