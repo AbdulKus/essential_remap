@@ -31,7 +31,7 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun releaseSetupBlocksOemWakeAndStartsShellMonitor() {
+    fun releaseSetupKeepsStockBlockSettingAndStartsShellMonitor() {
         assertEquals(
             listOf(
                 "pm disable-user --user 0 com.nothing.ntessentialspace",
@@ -50,11 +50,10 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun restoringSpaceStopsMonitorRestoresWakeAndEnablesPackages() {
+    fun restoringSpaceStopsMonitorAndLeavesStockBlockSettingUntouched() {
         assertEquals(
             listOf(
                 ShellKeyMonitorCommands.stop,
-                "settings put secure nt_block_essential_key 0 && echo 'new state: nt_block_essential_key=0'",
                 "pm enable --user 0 com.nothing.ntessentialspace",
                 "pm enable --user 0 com.nothing.ntessentialrecorder",
             ),
