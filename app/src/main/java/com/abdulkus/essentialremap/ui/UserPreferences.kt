@@ -46,9 +46,17 @@ class UserPreferences(context: Context) {
             preferences.edit().putBoolean(KEY_SCREEN_OFF_ENABLED, value).apply()
         }
 
+    fun recordConfiguredLaunch(): Long {
+        val current = preferences.getLong(KEY_CONFIGURED_LAUNCH_COUNT, 0L)
+        val next = if (current == Long.MAX_VALUE) current else current + 1L
+        preferences.edit().putLong(KEY_CONFIGURED_LAUNCH_COUNT, next).apply()
+        return next
+    }
+
     private companion object {
         const val KEY_LANGUAGE = "language"
         const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
         const val KEY_SCREEN_OFF_ENABLED = "screen_off_enabled"
+        const val KEY_CONFIGURED_LAUNCH_COUNT = "configured_launch_count"
     }
 }
