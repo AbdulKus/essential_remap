@@ -174,7 +174,7 @@ class MainActivity : ComponentActivity() {
         updatePromptState.value = UpdatePromptState.Checking
         activityScope.launch {
             val release = runCatching { updateManager.checkForUpdate() }.getOrNull()
-            updatePromptState.value = release?.let(UpdatePromptState::Available) ?: UpdatePromptState.None
+            updatePromptState.value = release?.let { UpdatePromptState.Available(it) } ?: UpdatePromptState.None
         }
     }
 
