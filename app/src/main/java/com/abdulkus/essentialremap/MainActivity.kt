@@ -281,7 +281,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openDonate() {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/AbdulKus/donate")))
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://abdulkus.github.io/donate")))
     }
 
     private fun copyToClipboard(text: String) {
