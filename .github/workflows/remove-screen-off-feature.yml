@@ -1,0 +1,202 @@
+name: Remove obsolete screen-off-after-action feature
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/remove-screen-off-feature.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove feature and bump release
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def read(path):
+              return Path(path).read_text()
+
+          def write(path, text):
+              Path(path).write_text(text)
+
+          def replace(path, old, new="", count=1):
+              text = read(path)
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f"{path}: expected at least {count} occurrence(s), found {actual}: {old[:100]!r}")
+              text = text.replace(old, new, count)
+              write(path, text)
+
+          # Domain model: remove the setting and policy entirely.
+          path = "app/src/main/java/com/abdulkus/essentialremap/domain/Models.kt"
+          replace(path, "    val turnScreenOffAfterWake: Map<PressAction, Boolean> = defaultTurnScreenOffAfterWake(),\n")
+          replace(path, "\n        fun defaultTurnScreenOffAfterWake(): Map<PressAction, Boolean> =\n            PressAction.entries.associateWith { false }\n")
+          replace(path, "\nobject ScreenOffAfterWakePolicy {\n    fun shouldTurnOff(\n        action: PressAction,\n        startedScreenOff: Boolean,\n        turnScreenOffAfterWake: Map<PressAction, Boolean>,\n    ): Boolean = startedScreenOff && turnScreenOffAfterWake[action] == true\n}\n")
+
+          # Repository API + DataStore: stop storing or reading the obsolete option.
+          path = "app/src/main/java/com/abdulkus/essentialremap/data/SettingsRepository.kt"
+          replace(path, "        turnScreenOffAfterWake: Map<PressAction, Boolean>,\n")
+
+          path = "app/src/main/java/com/abdulkus/essentialremap/data/DataStoreSettingsRepository.kt"
+          replace(path, "        turnScreenOffAfterWake: Map<PressAction, Boolean>,\n")
+          replace(path, "                preferences[Keys.turnScreenOffAfterWake(action)] =\n                    turnScreenOffAfterWake[action] == true\n")
+          replace(path, "    val turnScreenOffAfterWake = PressAction.entries.associateWith { gesture ->\n        preferences[Keys.turnScreenOffAfterWake(gesture)] ?: false\n    }\n")
+          replace(path, "        turnScreenOffAfterWake = turnScreenOffAfterWake,\n")
+          replace(path, "    fun turnScreenOffAfterWake(action: PressAction) =\n        booleanPreferencesKey(\"${action.name}_turn_screen_off_after_wake\")\n")
+
+          # ViewModel: remove draft state, mutation API and save plumbing.
+          path = "app/src/main/java/com/abdulkus/essentialremap/ui/MapperViewModel.kt"
+          replace(path, "    val draftTurnScreenOffAfterWake: Map<PressAction, Boolean> =\n        AppSettings.defaultTurnScreenOffAfterWake(),\n")
+          replace(path, "            draftRunWhileLocked != settings.runWhileLocked ||\n            draftTurnScreenOffAfterWake != settings.turnScreenOffAfterWake\n", "            draftRunWhileLocked != settings.runWhileLocked\n")
+          replace(path, "                        draftTurnScreenOffAfterWake = if (preserveDraft) {\n                            current.draftTurnScreenOffAfterWake\n                        } else {\n                            settings.turnScreenOffAfterWake\n                        },\n")
+          text = read(path)
+          text, n = re.subn(
+              r"\n    fun updateTurnScreenOffAfterWake\(gesture: PressAction, enabled: Boolean\) \{.*?\n    \}\n\n    fun setRemappingEnabled",
+              "\n    fun setRemappingEnabled",
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"{path}: could not remove updateTurnScreenOffAfterWake")
+          write(path, text)
+          replace(path, "                    turnScreenOffAfterWake = _uiState.value.draftTurnScreenOffAfterWake,\n")
+
+          # UI: remove the control itself and all callback plumbing.
+          path = "app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt"
+          replace(path, "        updateTurnScreenOffAfterWake = viewModel::updateTurnScreenOffAfterWake,\n")
+          replace(path, "    updateTurnScreenOffAfterWake: (PressAction, Boolean) -> Unit,\n")
+          replace(path, "                    turnScreenOffAfterWake =\n                        state.draftTurnScreenOffAfterWake[gesture] == true,\n")
+          replace(path, "                    onTurnScreenOffAfterWakeChanged = {\n                        updateTurnScreenOffAfterWake(gesture, it)\n                    },\n")
+          replace(path, "    turnScreenOffAfterWake: Boolean,\n")
+          replace(path, "    onTurnScreenOffAfterWakeChanged: (Boolean) -> Unit,\n")
+          replace(path, "    val canTurnScreenOffAfterWake =\n        runWhileLocked && action != ConfiguredAction.None\n")
+          obsolete_ui = '''            HorizontalDivider(modifier = Modifier.padding(horizontal = 18.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = canTurnScreenOffAfterWake) {
+                        onTurnScreenOffAfterWakeChanged(!turnScreenOffAfterWake)
+                    }
+                    .padding(start = 18.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        language.t("Turn screen off again", "Снова погасить экран"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        language.t(
+                            "Only if this press woke it",
+                            "Только если это нажатие его разбудило",
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Checkbox(
+                    checked = turnScreenOffAfterWake,
+                    onCheckedChange = null,
+                    enabled = canTurnScreenOffAfterWake,
+                )
+            }
+'''
+          replace(path, obsolete_ui)
+
+          # Runtime: never lock the screen after dispatching an action.
+          path = "app/src/main/java/com/abdulkus/essentialremap/KeyAccessibilityService.kt"
+          replace(path, "import com.abdulkus.essentialremap.domain.ScreenOffAfterWakePolicy\n")
+          replace(path, "import kotlinx.coroutines.delay\n")
+          replace(path, "                            \"runWhileLocked=${settings.runWhileLocked.enabledSummary()} \" +\n                            \"turnOffAfterWake=${settings.turnScreenOffAfterWake.enabledSummary()}\",\n", "                            \"runWhileLocked=${settings.runWhileLocked.enabledSummary()}\",\n")
+          replace(path, "        val turnScreenOffAfterWake = ScreenOffAfterWakePolicy.shouldTurnOff(\n            action = action,\n            startedScreenOff = startedScreenOff,\n            turnScreenOffAfterWake = currentSettings.turnScreenOffAfterWake,\n        )\n")
+          replace(path, "        trace(\n            \"action dispatch: press=$action configured=${config.safeName()} \" +\n                \"turnScreenOffAfterWake=$turnScreenOffAfterWake\",\n        )\n", "        trace(\"action dispatch: press=$action configured=${config.safeName()}\")\n")
+          text = read(path)
+          text, n = re.subn(
+              r"\n                if \(turnScreenOffAfterWake\) \{.*?\n                \}\n                val prefix =",
+              "\n                val prefix =",
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"{path}: could not remove runtime screen-off block")
+          write(path, text)
+          replace(path, "        const val SCREEN_OFF_AFTER_WAKE_DELAY_MS = 750L\n")
+
+          # Tests: remove obsolete behavior and adapt repository fake / settings mapper.
+          path = "app/src/test/java/com/abdulkus/essentialremap/MapperViewModelTest.kt"
+          text = read(path)
+          text, n = re.subn(
+              r"\n    @Test\n    fun turnScreenOffAfterWakeOptionRemainsDraftUntilSave\(\) = runTest\(dispatcher\) \{.*?\n    \}\n\n    @Test\n    fun keyDetectionRequiresReleasedPackageAndAccessibility",
+              "\n    @Test\n    fun keyDetectionRequiresReleasedPackageAndAccessibility",
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit(f"{path}: could not remove obsolete ViewModel test")
+          text = text.replace("            turnScreenOffAfterWake: Map<PressAction, Boolean>,\n", "", 1)
+          text = text.replace("                turnScreenOffAfterWake = turnScreenOffAfterWake,\n", "", 1)
+          write(path, text)
+
+          path = "app/src/test/java/com/abdulkus/essentialremap/DataStoreSettingsMapperTest.kt"
+          replace(path, "            booleanPreferencesKey(\"DOUBLE_turn_screen_off_after_wake\") to true,\n")
+          replace(path, "        assertEquals(true, settings.turnScreenOffAfterWake.getValue(PressAction.DOUBLE))\n")
+          replace(path, "        assertEquals(false, settings.turnScreenOffAfterWake.getValue(PressAction.SINGLE))\n")
+
+          obsolete_test = Path("app/src/test/java/com/abdulkus/essentialremap/ScreenOffAfterWakePolicyTest.kt")
+          if not obsolete_test.exists():
+              raise SystemExit("obsolete ScreenOffAfterWakePolicyTest.kt not found")
+          obsolete_test.unlink()
+
+          # Release metadata. Monitor revision intentionally stays 8.
+          replace("app/build.gradle.kts", '        versionCode = 20\n        versionName = "0.1.19"\n', '        versionCode = 21\n        versionName = "0.1.20"\n')
+          replace(".github/workflows/android.yml", "  APP_VERSION: 0.1.19\n", "  APP_VERSION: 0.1.20\n")
+
+          # Remove this one-shot workflow from the resulting commit.
+          Path(".github/workflows/remove-screen-off-feature.yml").unlink()
+
+          # Hard regression guard: no feature implementation/name may remain in app source/tests.
+          forbidden = (
+              "turnScreenOffAfterWake",
+              "Turn screen off again",
+              "Снова погасить экран",
+              "ScreenOffAfterWakePolicy",
+              "SCREEN_OFF_AFTER_WAKE_DELAY_MS",
+              "turn_screen_off_after_wake",
+          )
+          roots = [Path("app/src/main"), Path("app/src/test")]
+          leftovers = []
+          for root in roots:
+              for file in root.rglob("*"):
+                  if not file.is_file():
+                      continue
+                  try:
+                      body = file.read_text()
+                  except UnicodeDecodeError:
+                      continue
+                  for token in forbidden:
+                      if token in body:
+                          leftovers.append(f"{file}: {token}")
+          if leftovers:
+              raise SystemExit("obsolete feature leftovers:\n" + "\n".join(leftovers))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Remove screen-off-after-action feature and release 0.1.20"
+          git push
