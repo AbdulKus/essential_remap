@@ -31,12 +31,12 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun releaseSetupAllowsOemWakeAndStartsShellMonitor() {
+    fun releaseSetupBlocksOemWakeAndStartsShellMonitor() {
         assertEquals(
             listOf(
                 "pm disable-user --user 0 com.nothing.ntessentialspace",
                 "pm disable-user --user 0 com.nothing.ntessentialrecorder",
-                "settings put secure nt_block_essential_key 0 && echo essential-remap:ok",
+                "settings put secure nt_block_essential_key 1 && echo essential-remap:ok",
                 ShellKeyMonitorCommands.INSTALL,
             ),
             EssentialKeySetupCommands.commands(PackageOperation.DISABLE),
@@ -50,10 +50,11 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun restoringSpaceStopsMonitorBeforeEnablingPackages() {
+    fun restoringSpaceStopsMonitorRestoresWakeAndEnablesPackages() {
         assertEquals(
             listOf(
                 ShellKeyMonitorCommands.stop,
+                "settings put secure nt_block_essential_key 0 && echo 'new state: nt_block_essential_key=0'",
                 "pm enable --user 0 com.nothing.ntessentialspace",
                 "pm enable --user 0 com.nothing.ntessentialrecorder",
             ),
