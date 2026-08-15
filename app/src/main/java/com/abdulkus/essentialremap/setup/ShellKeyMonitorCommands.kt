@@ -137,7 +137,7 @@ object ShellKeyMonitorCommands {
           for candidate in /dev/input/event*; do
             [ -c "${'$'}candidate" ] || continue
             if /system/bin/getevent -pl "${'$'}candidate" 2>/dev/null |
-              /system/bin/grep -F '\"gpio-keys\"' >/dev/null 2>&1; then
+              /system/bin/grep -F '"gpio-keys"' >/dev/null 2>&1; then
               echo "${'$'}candidate"
               return 0
             fi
