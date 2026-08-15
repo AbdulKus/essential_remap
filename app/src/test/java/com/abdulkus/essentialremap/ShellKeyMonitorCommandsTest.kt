@@ -81,9 +81,11 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
-    fun installerStreamsPayloadThroughAHereDocument() {
+    fun installerStagesPayloadAsRawBytesBeforeExecutingIt() {
         val installer = ShellKeyMonitorCommands.installSessionScript
+        val service = ShellKeyMonitorCommands.INSTALL_SERVICE
         val revision = ShellKeyMonitorCommands.REVISION
+        val payloadBytes = installer.toByteArray(Charsets.UTF_8).size
 
         assertTrue(installer.contains("ESSENTIAL_REMAP_MONITOR_EOF"))
         assertTrue(installer.contains("/system/bin/base64 -d"))
@@ -93,8 +95,16 @@ class ShellKeyMonitorCommandsTest {
         assertTrue(installer.contains("/system/bin/mv -f"))
         assertTrue(installer.endsWith("exit\n"))
         assertTrue(ShellKeyMonitorCommands.INSTALL.length < 100)
-        assertTrue(ShellKeyMonitorCommands.INSTALL_SERVICE.startsWith("exec:"))
-        assertFalse(ShellKeyMonitorCommands.INSTALL_SERVICE.startsWith("shell:"))
+
+        assertTrue(service.startsWith("exec:"))
+        assertFalse(service.startsWith("shell:"))
+        assertFalse(service == "exec:/system/bin/sh")
+        assertTrue(service.contains("/system/bin/stty raw -echo"))
+        assertTrue(service.contains("/system/bin/dd bs=1 count=$payloadBytes"))
+        assertTrue(service.contains("of=/data/local/tmp/essential_remap/install-monitor.sh"))
+        assertTrue(service.contains("/system/bin/sh /data/local/tmp/essential_remap/install-monitor.sh"))
+        assertTrue(service.contains("installer_status=${'$'}?"))
+
         assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.startsWith(ShellKeyMonitorCommands.START_OK))
         assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.startsWith(ShellKeyMonitorCommands.RUNNING))
         assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.endsWith("revision=$revision"))
