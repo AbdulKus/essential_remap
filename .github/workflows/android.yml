@@ -127,5 +127,5 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           files: |
-            essential-remap-${APP_VERSION}.apk
-            essential-remap-${APP_VERSION}.apk.sha256
+            essential-remap-${{ env.APP_VERSION }}.apk
+            essential-remap-${{ env.APP_VERSION }}.apk.sha256
