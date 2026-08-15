@@ -8,7 +8,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 7
+    const val REVISION = 8
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
@@ -17,6 +17,7 @@ object ShellKeyMonitorCommands {
     private const val TEMP_SCRIPT = "$DIRECTORY/key-monitor.sh.new"
     private const val INSTALLER_SCRIPT = "$DIRECTORY/install-monitor.sh"
     private const val INSTALL_LOG = "$DIRECTORY/install-monitor.log"
+    private const val START_OUTPUT = "$DIRECTORY/key-monitor-start.out"
     private const val PID_FILE = "$DIRECTORY/key-monitor.pid"
     private const val STATE_FILE = "$DIRECTORY/key-monitor.state"
     private const val LOG_FILE = "$DIRECTORY/key-monitor.log"
@@ -40,17 +41,24 @@ object ShellKeyMonitorCommands {
           case "${'$'}candidate_pid" in ''|*[!0-9]*) return 1 ;; esac
           candidate_cmdline="/proc/${'$'}candidate_pid/cmdline"
           [ -r "${'$'}candidate_cmdline" ] || return 1
-          /system/bin/grep -aF "${'$'}SCRIPT" "${'$'}candidate_cmdline" >/dev/null 2>&1 || return 1
-          /system/bin/grep -aF 'run' "${'$'}candidate_cmdline" >/dev/null 2>&1 || return 1
-          return 0
+          candidate_args="${'$'}(/system/bin/tr '\000' ' ' < "${'$'}candidate_cmdline" 2>/dev/null)"
+          case "${'$'}candidate_args" in
+            *"${'$'}SCRIPT"*' run'*) return 0 ;;
+          esac
+          return 1
         }
 
         monitor_pids() {
-          for proc_dir in /proc/[0-9]*; do
-            [ -d "${'$'}proc_dir" ] || continue
-            candidate_pid="${'$'}{proc_dir#/proc/}"
-            [ "${'$'}candidate_pid" = "${'$'}${'$'}" ] && continue
-            is_monitor_pid "${'$'}candidate_pid" && echo "${'$'}candidate_pid"
+          /system/bin/ps -A -o PID,ARGS 2>/dev/null | while IFS= read -r process_line; do
+            set -- ${'$'}process_line
+            [ "${'$'}#" -ge 2 ] || continue
+            candidate_pid="${'$'}1"
+            case "${'$'}candidate_pid" in ''|*[!0-9]*) continue ;; esac
+            shift
+            process_args="${'$'}*"
+            case "${'$'}process_args" in
+              *"${'$'}SCRIPT"*' run'*) echo "${'$'}candidate_pid" ;;
+            esac
           done
         }
 
@@ -74,7 +82,9 @@ object ShellKeyMonitorCommands {
             kill_tree "${'$'}stale_pid"
           done
           wait_count=0
-          while [ -n "${'$'}(monitor_pids)" ] && [ "${'$'}wait_count" -lt 30 ]; do
+          while [ "${'$'}wait_count" -lt 30 ]; do
+            remaining="${'$'}(monitor_pids)"
+            [ -z "${'$'}remaining" ] && break
             /system/bin/sleep 0.1
             wait_count=${'$'}((wait_count + 1))
           done
@@ -252,6 +262,7 @@ object ShellKeyMonitorCommands {
           start)
             /system/bin/mkdir -p "${'$'}DIR"
             : > "${'$'}LOG_FILE"
+            log_monitor "start entered revision=${'$'}MONITOR_REVISION pid=${'$'}${'$'}"
             if ! stop_all_monitors; then
               echo essential-remap:shell-monitor-cleanup-failed
               /system/bin/tail -n 30 "${'$'}LOG_FILE" 2>/dev/null
@@ -317,10 +328,11 @@ object ShellKeyMonitorCommands {
 
     val installSessionScript: String = buildString {
         appendLine("INSTALL_LOG=$INSTALL_LOG")
+        appendLine("START_OUTPUT=$START_OUTPUT")
         appendLine("log_install() { echo \"$(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ${'$'}*\" >> \"${'$'}INSTALL_LOG\"; }")
         appendLine("log_install 'stage=installer-start revision=$REVISION'")
         appendLine("/system/bin/mkdir -p $DIRECTORY || exit 1")
-        appendLine("/system/bin/rm -f $TEMP_SCRIPT")
+        appendLine("/system/bin/rm -f $TEMP_SCRIPT $START_OUTPUT")
         appendLine("/system/bin/base64 -d > $TEMP_SCRIPT <<'ESSENTIAL_REMAP_MONITOR_EOF'")
         appendLine(encodedScript)
         appendLine("ESSENTIAL_REMAP_MONITOR_EOF")
@@ -339,10 +351,12 @@ object ShellKeyMonitorCommands {
         appendLine("log_install 'stage=validate status=ok'")
         appendLine("/system/bin/chmod 700 $TEMP_SCRIPT && /system/bin/mv -f $TEMP_SCRIPT $SCRIPT || exit 1")
         appendLine("log_install 'stage=script-installed revision=$REVISION'")
-        appendLine("start_output=\"$(/system/bin/sh $SCRIPT start 2>&1)\"")
+        appendLine("log_install 'stage=start-invoke revision=$REVISION'")
+        appendLine("/system/bin/sh $SCRIPT start > $START_OUTPUT 2>&1")
         appendLine("start_status=${'$'}?")
-        appendLine("printf '%s\\n' \"${'$'}start_output\" >> \"${'$'}INSTALL_LOG\"")
-        appendLine("printf '%s\\n' \"${'$'}start_output\"")
+        appendLine("/system/bin/cat $START_OUTPUT >> \"${'$'}INSTALL_LOG\" 2>/dev/null")
+        appendLine("/system/bin/cat $START_OUTPUT 2>/dev/null")
+        appendLine("/system/bin/rm -f $START_OUTPUT")
         appendLine("log_install \"stage=start status=${'$'}start_status\"")
         appendLine("exit \"${'$'}start_status\"")
     }
