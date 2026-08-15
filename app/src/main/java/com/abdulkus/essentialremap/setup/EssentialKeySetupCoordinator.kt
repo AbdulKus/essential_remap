@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -35,6 +36,7 @@ import kotlinx.coroutines.withTimeout
 enum class SetupPhase {
     IDLE,
     DISCOVERING,
+    WAITING_FOR_WIRELESS_DEBUGGING,
     WAITING_FOR_CODE,
     PAIRING,
     CONNECTING,
@@ -52,6 +54,7 @@ data class EssentialKeySetupState(
 ) {
     val busy: Boolean get() = phase in setOf(
         SetupPhase.DISCOVERING,
+        SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING,
         SetupPhase.WAITING_FOR_CODE,
         SetupPhase.PAIRING,
         SetupPhase.CONNECTING,
@@ -106,24 +109,23 @@ class EssentialKeySetupCoordinator(
         _state.value = EssentialKeySetupState(
             packageStatus = statusReader.read(),
             screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
-            phase = SetupPhase.WAITING_FOR_CODE,
+            phase = SetupPhase.DISCOVERING,
             operation = operation,
             message = text(
-                "Open Wireless debugging and choose Pair device with pairing code",
-                "Откройте Wireless debugging и выберите сопряжение по коду",
+                "Connecting to Wireless debugging…",
+                "Подключаемся к Wireless debugging…",
             ),
         )
         diagnostics.log("--- Setup started: operation=$operation packageStatus=${_state.value.packageStatus} ---")
-        postPairingNotification()
         setupJob = scope.launch {
             runCatching {
-                val code = withTimeout(PAIRING_TIMEOUT_MS) { pairingCode.await() }
-                diagnostics.log("Discovering the live pairing endpoint after code submission")
-                val pairingEndpoint = discoverAdbEndpoint(
-                    AdbMdns.SERVICE_TYPE_TLS_PAIRING,
-                    LIVE_PAIRING_DISCOVERY_TIMEOUT_MS,
-                )
-                applyOperation(pairingEndpoint, code, operation)
+                val existingManager = connectUsingStoredIdentity()
+                if (existingManager != null) {
+                    diagnostics.log("Using previously paired ADB identity")
+                    applyConnectedOperation(existingManager, operation)
+                } else {
+                    pairThenApply(operation)
+                }
             }.onFailure { error ->
                 if (error is kotlinx.coroutines.CancellationException) return@onFailure
                 diagnostics.log("Setup failed: ${error.fullDescription()}")
@@ -192,35 +194,91 @@ class EssentialKeySetupCoordinator(
         }
     }
 
-    private suspend fun applyOperation(
-        pairingEndpoint: AdbEndpoint,
-        code: String,
+    private suspend fun pairThenApply(operation: PackageOperation) {
+        openWirelessDebuggingSettings()
+        _state.value = _state.value.copy(
+            phase = SetupPhase.WAITING_FOR_CODE,
+            message = text(
+                "Choose “Pair device with pairing code” and enter the six-digit code here.",
+                "Выберите «Сопряжение с помощью кода» и введите сюда шестизначный код.",
+            ),
+        )
+        postPairingNotification()
+        val code = withTimeout(PAIRING_TIMEOUT_MS) { pairingCode.await() }
+        diagnostics.log("Discovering live pairing endpoint after code submission")
+        val pairingEndpoint = discoverAdbEndpoint(
+            AdbMdns.SERVICE_TYPE_TLS_PAIRING,
+            LIVE_PAIRING_DISCOVERY_TIMEOUT_MS,
+        )
+        _state.value = _state.value.copy(
+            phase = SetupPhase.PAIRING,
+            message = text("Pairing with Android", "Сопряжение с Android"),
+        )
+        postProgressNotification()
+        pairWithFallback(pairingEndpoint, code)
+        _state.value = _state.value.copy(
+            phase = SetupPhase.CONNECTING,
+            message = text("Connecting with the saved key", "Подключаемся по сохранённому ключу"),
+        )
+        postProgressNotification()
+        delay(CONNECTION_AFTER_PAIR_DELAY_MS)
+        applyConnectedOperation(connectWithRetry(), operation)
+    }
+
+    private suspend fun connectUsingStoredIdentity(): LocalAdbConnectionManager? {
+        if (!LocalAdbConnectionManager.hasStoredIdentity(appContext)) {
+            diagnostics.log("No stored ADB identity; pairing is required")
+            openWirelessDebuggingSettings()
+            return null
+        }
+
+        runCatching {
+            return connectWithRetry(attempts = 1, discoveryTimeoutMs = SAVED_KEY_INITIAL_DISCOVERY_TIMEOUT_MS)
+        }.onFailure {
+            diagnostics.log("Saved-key fast connect unavailable: ${it.fullDescription()}")
+        }
+
+        _state.value = _state.value.copy(
+            phase = SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING,
+            message = text(
+                "Turn on Wireless debugging. Essential Remap will reconnect automatically.",
+                "Включите Wireless debugging. Essential Remap подключится автоматически.",
+            ),
+        )
+        openWirelessDebuggingSettings()
+        postProgressNotification()
+
+        repeat(SAVED_KEY_WAIT_ATTEMPTS) { attempt ->
+            if (attempt > 0) delay(SAVED_KEY_WAIT_DELAY_MS)
+            val result = runCatching {
+                connectWithRetry(attempts = 1, discoveryTimeoutMs = SAVED_KEY_RETRY_DISCOVERY_TIMEOUT_MS)
+            }
+            result.getOrNull()?.let { return it }
+            val error = result.exceptionOrNull()
+            if (error != null) {
+                diagnostics.log("Saved-key retry ${attempt + 1}/$SAVED_KEY_WAIT_ATTEMPTS: ${error.fullDescription()}")
+                if (isAuthorizationFailure(error)) {
+                    diagnostics.log("Stored ADB identity is no longer authorized; falling back to pairing")
+                    return null
+                }
+            }
+        }
+        diagnostics.log("Wireless debugging did not become connectable with stored key; pairing fallback")
+        return null
+    }
+
+    private suspend fun applyConnectedOperation(
+        connectedManager: LocalAdbConnectionManager,
         operation: PackageOperation,
     ) {
-        var manager: LocalAdbConnectionManager? = null
         try {
-            _state.value = _state.value.copy(
-                phase = SetupPhase.PAIRING,
-                message = text("Pairing with Android", "Сопряжение с Android"),
-            )
-            postProgressNotification()
-            pairWithFallback(pairingEndpoint, code)
-            _state.value = _state.value.copy(
-                phase = SetupPhase.CONNECTING,
-                message = text("Connecting to local ADB", "Подключение к локальному ADB"),
-            )
-            postProgressNotification()
-            diagnostics.log("Pairing succeeded; waiting ${CONNECTION_AFTER_PAIR_DELAY_MS}ms for TLS-connect service")
-            delay(CONNECTION_AFTER_PAIR_DELAY_MS)
-            val connectedManager = connectWithRetry()
-            manager = connectedManager
-            diagnostics.log("ADB connection established")
+            diagnostics.log("ADB connection established for operation=$operation")
             _state.value = _state.value.copy(
                 phase = SetupPhase.APPLYING,
-                message = if (operation == PackageOperation.DISABLE) {
-                    text("Releasing the Essential Key", "Освобождаем Essential Key")
-                } else {
-                    text("Restoring Essential Space", "Возвращаем Essential Space")
+                message = when (operation) {
+                    PackageOperation.DISABLE -> text("Releasing Essential Key", "Освобождаем Essential Key")
+                    PackageOperation.INSTALL_SLEEP_MONITOR -> text("Starting sleep monitor", "Запускаем монитор сна")
+                    PackageOperation.RESTORE -> text("Restoring Essential Space", "Откатываем к Essential Space")
                 },
             )
             postProgressNotification()
@@ -233,27 +291,33 @@ class EssentialKeySetupCoordinator(
                 ScreenOffKeyAccess.markStopped(appContext)
             }
             val packageStatus = verifyPackageState(connectedManager, operation)
-            val screenOffAccessGranted = if (operation == PackageOperation.DISABLE) {
-                verifyScreenOffAccess(connectedManager)
-                ScreenOffKeyAccess.markStarted(appContext)
-                true
-            } else {
-                false
+            val screenOffAccessGranted = when (operation) {
+                PackageOperation.INSTALL_SLEEP_MONITOR -> {
+                    verifyScreenOffAccess(connectedManager)
+                    ScreenOffKeyAccess.markStarted(appContext)
+                    SleepMonitorBootReceiver.cancelReminder(appContext)
+                    true
+                }
+                PackageOperation.DISABLE -> ScreenOffKeyAccess.isGranted(appContext)
+                PackageOperation.RESTORE -> false
             }
-            diagnostics.log("Package verification succeeded: status=$packageStatus")
+            diagnostics.log("Operation verification succeeded: status=$packageStatus screenOff=$screenOffAccessGranted")
             _state.value = EssentialKeySetupState(
                 packageStatus = packageStatus,
                 screenOffAccessGranted = screenOffAccessGranted,
                 phase = SetupPhase.COMPLETE,
                 operation = operation,
-                message = if (operation == PackageOperation.DISABLE) {
-                    text(
-                        "Essential Key released and the shell sleep monitor started. You can turn off Wireless debugging.",
-                        "Essential Key освобождена, shell-монитор сна запущен. Wireless debugging можно выключить.",
+                message = when (operation) {
+                    PackageOperation.DISABLE -> text(
+                        "Essential Key released. Wireless debugging can be turned off.",
+                        "Essential Key освобождена. Wireless debugging можно выключить.",
                     )
-                } else {
-                    text(
-                        "Essential Space restored. You can turn off Wireless debugging.",
+                    PackageOperation.INSTALL_SLEEP_MONITOR -> text(
+                        "Sleep monitor started. Wireless debugging can be turned off.",
+                        "Монитор сна запущен. Wireless debugging можно выключить.",
+                    )
+                    PackageOperation.RESTORE -> text(
+                        "Essential Space restored. Wireless debugging can be turned off.",
                         "Essential Space восстановлен. Wireless debugging можно выключить.",
                     )
                 },
@@ -263,7 +327,7 @@ class EssentialKeySetupCoordinator(
             postResultNotification(text("Setup complete", "Настройка завершена"), successMessage)
             returnToApp()
         } finally {
-            runCatching { manager?.disconnect() }
+            runCatching { connectedManager.disconnect() }
         }
     }
 
@@ -353,15 +417,18 @@ class EssentialKeySetupCoordinator(
         return true
     }
 
-    private suspend fun connectWithRetry(): LocalAdbConnectionManager {
+    private suspend fun connectWithRetry(
+        attempts: Int = CONNECTION_ATTEMPTS,
+        discoveryTimeoutMs: Long = CONNECTION_DISCOVERY_TIMEOUT_MS,
+    ): LocalAdbConnectionManager {
         var lastError: Throwable? = null
-        repeat(CONNECTION_ATTEMPTS) { attempt ->
+        repeat(attempts) { attempt ->
             if (attempt > 0) delay(CONNECTION_RETRY_DELAY_MS)
-            diagnostics.log("Connect discovery attempt ${attempt + 1}/$CONNECTION_ATTEMPTS")
+            diagnostics.log("Connect discovery attempt ${attempt + 1}/$attempts")
             val endpoint = try {
                 discoverAdbEndpoint(
                     AdbMdns.SERVICE_TYPE_TLS_CONNECT,
-                    CONNECTION_DISCOVERY_TIMEOUT_MS,
+                    discoveryTimeoutMs,
                 )
             } catch (error: Throwable) {
                 lastError = error
@@ -388,7 +455,7 @@ class EssentialKeySetupCoordinator(
             }
         }
         throw IOException(
-            "Could not connect to Android’s Wireless debugging service after pairing. " +
+            "Could not connect to Android Wireless debugging. " +
                 "Keep Wireless debugging enabled and try again. ${lastError?.message.orEmpty()}",
             lastError,
         )
@@ -421,6 +488,25 @@ class EssentialKeySetupCoordinator(
         )
     }
 
+    private fun openWirelessDebuggingSettings() {
+        val direct = Intent(ACTION_WIRELESS_DEBUGGING_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val fallback = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .putExtra(SETTINGS_FRAGMENT_ARGUMENT_KEY, WIRELESS_DEBUGGING_PREFERENCE_KEY)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = if (direct.resolveActivity(appContext.packageManager) != null) direct else fallback
+        runCatching { appContext.startActivity(intent) }
+            .onFailure { diagnostics.log("Could not open Wireless debugging settings: ${it.fullDescription()}") }
+    }
+
+    private fun isAuthorizationFailure(error: Throwable): Boolean =
+        generateSequence(error) { it.cause }
+            .mapNotNull { it.message }
+            .any { message ->
+                message.contains("auth", ignoreCase = true) ||
+                    message.contains("unauthor", ignoreCase = true) ||
+                    message.contains("certificate", ignoreCase = true)
+            }
+
     private fun Throwable.fullDescription(): String =
         generateSequence(this) { it.cause }
             .map { cause ->
@@ -434,7 +520,7 @@ class EssentialKeySetupCoordinator(
         manager: LocalAdbConnectionManager,
         operation: PackageOperation,
     ): NothingPackageStatus {
-        val flag = if (operation == PackageOperation.DISABLE) "-d" else "-e"
+        val flag = if (operation == PackageOperation.RESTORE) "-e" else "-d"
         val verified = NothingPackageCommands.packages.all { packageName ->
             val command = "pm list packages $flag $packageName"
             val expected = "package:$packageName"
@@ -444,10 +530,10 @@ class EssentialKeySetupCoordinator(
             output.contains(expected)
         }
         if (!verified) error("Android could not verify both Nothing packages")
-        return if (operation == PackageOperation.DISABLE) {
-            NothingPackageStatus.DISABLED
-        } else {
+        return if (operation == PackageOperation.RESTORE) {
             NothingPackageStatus.ENABLED
+        } else {
+            NothingPackageStatus.DISABLED
         }
     }
 
@@ -613,8 +699,8 @@ class EssentialKeySetupCoordinator(
     private fun friendlyError(error: Throwable): String = when {
         error is kotlinx.coroutines.TimeoutCancellationException ->
             text(
-                "Pairing timed out. Keep the pairing dialog open and try again.",
-                "Время сопряжения истекло. Не закрывайте окно с кодом и попробуйте снова.",
+                "Wireless debugging timed out. Keep it enabled and try again.",
+                "Время ожидания Wireless debugging истекло. Оставьте его включённым и попробуйте снова.",
             )
         error.message?.contains("authentication", ignoreCase = true) == true ->
             text(
@@ -645,10 +731,17 @@ class EssentialKeySetupCoordinator(
         private const val CONNECTION_DISCOVERY_TIMEOUT_MS = 5_000L
         private const val CONNECTION_RETRY_DELAY_MS = 1_000L
         private const val CONNECTION_AFTER_PAIR_DELAY_MS = 1_500L
+        private const val SAVED_KEY_INITIAL_DISCOVERY_TIMEOUT_MS = 2_500L
+        private const val SAVED_KEY_RETRY_DISCOVERY_TIMEOUT_MS = 1_500L
+        private const val SAVED_KEY_WAIT_ATTEMPTS = 12
+        private const val SAVED_KEY_WAIT_DELAY_MS = 750L
         private const val LOOPBACK_HOST = "127.0.0.1"
         private const val COMMAND_TIMEOUT_MS = 15_000L
         private const val SHELL_POLL_INTERVAL_MS = 25L
         private const val SHELL_WRITE_CHUNK_BYTES = 1_024
         private const val MAX_LOG_OUTPUT_CHARS = 2_000
+        private const val ACTION_WIRELESS_DEBUGGING_SETTINGS = "android.settings.WIRELESS_DEBUGGING_SETTINGS"
+        private const val SETTINGS_FRAGMENT_ARGUMENT_KEY = ":settings:fragment_args_key"
+        private const val WIRELESS_DEBUGGING_PREFERENCE_KEY = "toggle_adb_wireless"
     }
 }

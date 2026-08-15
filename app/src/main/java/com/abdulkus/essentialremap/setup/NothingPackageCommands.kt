@@ -2,6 +2,7 @@ package com.abdulkus.essentialremap.setup
 
 enum class PackageOperation {
     DISABLE,
+    INSTALL_SLEEP_MONITOR,
     RESTORE,
 }
 
@@ -13,7 +14,9 @@ object NothingPackageCommands {
 
     fun commands(operation: PackageOperation): List<String> = packages.map { packageName ->
         when (operation) {
-            PackageOperation.DISABLE -> "pm disable-user --user 0 $packageName"
+            PackageOperation.DISABLE,
+            PackageOperation.INSTALL_SLEEP_MONITOR,
+            -> "pm disable-user --user 0 $packageName"
             PackageOperation.RESTORE -> "pm enable --user 0 $packageName"
         }
     }
@@ -28,6 +31,10 @@ object EssentialKeySetupCommands {
     fun commands(operation: PackageOperation): List<String> = buildList {
         when (operation) {
             PackageOperation.DISABLE -> {
+                addAll(NothingPackageCommands.commands(operation))
+            }
+            PackageOperation.INSTALL_SLEEP_MONITOR -> {
+                // Re-applying package disable is intentional and makes restart/install idempotent.
                 addAll(NothingPackageCommands.commands(operation))
                 add(ENABLE_RELIABLE_SCREEN_OFF_DISPATCH)
                 add(ShellKeyMonitorCommands.INSTALL)

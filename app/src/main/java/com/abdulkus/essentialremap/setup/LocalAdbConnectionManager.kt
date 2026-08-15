@@ -42,6 +42,11 @@ class LocalAdbConnectionManager(context: Context) : AbsAdbConnectionManager() {
     override fun getCertificate(): Certificate = identity.certificate
 
     override fun getDeviceName(): String = "Essential Remap"
+
+    companion object {
+        fun hasStoredIdentity(context: Context): Boolean =
+            EncryptedAdbIdentityStore(context.applicationContext).hasIdentity()
+    }
 }
 
 internal data class AdbIdentity(
@@ -56,6 +61,8 @@ internal data class AdbIdentity(
  */
 internal class EncryptedAdbIdentityStore(private val context: Context) {
     private val identityFile = context.filesDir.resolve(IDENTITY_FILE)
+
+    fun hasIdentity(): Boolean = identityFile.isFile && identityFile.length() > 0L
 
     fun loadOrCreate(): AdbIdentity {
         runCatching { read() }.getOrNull()?.let { return it }

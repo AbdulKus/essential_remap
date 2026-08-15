@@ -386,12 +386,15 @@ object ShellKeyMonitorCommands {
     const val stop = "/system/bin/sh $SCRIPT stop"
     const val status = "/system/bin/sh $SCRIPT status"
 
-    fun manualAdbCommands(): String = listOf(
-        "adb shell pm disable-user --user 0 ${NothingPackageCommands.ESSENTIAL_SPACE}",
-        "adb shell pm disable-user --user 0 ${NothingPackageCommands.ESSENTIAL_RECORDER}",
-        "adb shell settings put secure nt_block_essential_key 1",
-        "adb shell \"$installAndStart\"",
-    ).joinToString("\n")
+    fun manualAdbCommands(includeSleepMonitor: Boolean = true): String = buildList {
+        add("adb shell pm disable-user --user 0 ${NothingPackageCommands.ESSENTIAL_SPACE}")
+        add("adb shell pm disable-user --user 0 ${NothingPackageCommands.ESSENTIAL_RECORDER}")
+        if (includeSleepMonitor) {
+            add("adb shell settings put secure nt_block_essential_key 1")
+            add("adb shell \"$installAndStart\"")
+        }
+    }.joinToString("
+")
 
     internal fun scriptForTesting(): String = monitorScript
     private const val BASE64_LINE_LENGTH = 76

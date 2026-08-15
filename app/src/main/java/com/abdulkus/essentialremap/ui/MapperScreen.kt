@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.abdulkus.essentialremap.domain.ActionKind
@@ -95,12 +96,14 @@ import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
 fun EssentialRemapApp(
     viewModel: MapperViewModel,
     preferences: UserPreferences,
+    initiallyOpenSettings: Boolean,
     openAccessibilitySettings: () -> Unit,
     openNotificationPolicySettings: () -> Unit,
     openDeveloperOptions: () -> Unit,
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
+    openSetupVideo: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     copyText: (String) -> Unit,
 ) {
@@ -109,6 +112,11 @@ fun EssentialRemapApp(
     var languageCode by rememberSaveable { mutableStateOf(preferences.language?.code) }
     var onboardingComplete by rememberSaveable {
         mutableStateOf(preferences.onboardingComplete)
+    }
+    var screenOffEnabled by rememberSaveable { mutableStateOf(preferences.screenOffEnabled) }
+    val setScreenOffEnabled: (Boolean) -> Unit = { enabled ->
+        preferences.screenOffEnabled = enabled
+        screenOffEnabled = enabled
     }
     val language = AppLanguage.fromCode(languageCode)
 
@@ -128,6 +136,9 @@ fun EssentialRemapApp(
         OnboardingScreen(
             language = language,
             state = state,
+            screenOffEnabled = screenOffEnabled,
+            setScreenOffEnabled = setScreenOffEnabled,
+            openSetupVideo = openSetupVideo,
             openAccessibilitySettings = openAccessibilitySettings,
             openDeveloperOptions = openDeveloperOptions,
             beginPackageSetup = beginPackageSetup,
@@ -148,6 +159,9 @@ fun EssentialRemapApp(
         language = language,
         state = state,
         snackbar = snackbar,
+        screenOffEnabled = screenOffEnabled,
+        setScreenOffEnabled = setScreenOffEnabled,
+        initiallyOpenSettings = initiallyOpenSettings,
         openAccessibilitySettings = openAccessibilitySettings,
         openNotificationPolicySettings = openNotificationPolicySettings,
         openDeveloperOptions = openDeveloperOptions,
@@ -258,6 +272,9 @@ private fun EssentialMark() {
 private fun OnboardingScreen(
     language: AppLanguage,
     state: MapperUiState,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    openSetupVideo: () -> Unit,
     openAccessibilitySettings: () -> Unit,
     openDeveloperOptions: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
@@ -273,6 +290,8 @@ private fun OnboardingScreen(
     val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
     val screenOffReady = state.setup.screenOffAccessGranted
     val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
+    val pageCount = if (screenOffEnabled) 5 else 4
+    if (page >= pageCount) page = pageCount - 1
 
     Scaffold { padding ->
         Column(
@@ -292,11 +311,12 @@ private fun OnboardingScreen(
                     letterSpacing = 1.4.sp,
                 )
                 Spacer(Modifier.weight(1f))
-                Text("${page + 1}/3", fontFamily = FontFamily.Monospace)
+                Text("${page + 1}/$pageCount", fontFamily = FontFamily.Monospace)
             }
-            Spacer(Modifier.height(42.dp))
-            when (page) {
-                0 -> ReleaseKeyStep(
+            Spacer(Modifier.height(36.dp))
+            when {
+                page == 0 -> ModeChoiceStep(language, screenOffEnabled, setScreenOffEnabled, openSetupVideo)
+                page == 1 -> BaseSetupStep(
                     language,
                     state,
                     pairingCode,
@@ -309,11 +329,23 @@ private fun OnboardingScreen(
                     copyDiagnostics,
                     clearDiagnostics,
                 )
-                1 -> AccessibilityStep(language, state, openAccessibilitySettings)
-                else -> ReadyStep(language)
+                page == 2 -> AccessibilityStep(language, state, openAccessibilitySettings)
+                screenOffEnabled && page == 3 -> SleepSetupStep(
+                    language,
+                    state,
+                    pairingCode,
+                    { pairingCode = it.filter(Char::isDigit).take(6) },
+                    beginPackageSetup,
+                    submitPairingCode,
+                    cancelPackageSetup,
+                    copyText,
+                    copyDiagnostics,
+                    clearDiagnostics,
+                )
+                else -> ReadyStep(language, screenOffEnabled)
             }
             Spacer(Modifier.weight(1f))
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(28.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (page > 0) {
                     OutlinedButton(onClick = { page-- }, modifier = Modifier.weight(1f)) {
@@ -321,16 +353,18 @@ private fun OnboardingScreen(
                     }
                 }
                 Button(
-                    onClick = { if (page == 2) finish() else page++ },
-                    enabled = when (page) {
-                        0 -> keyReleased && screenOffReady
-                        1 -> serviceReady
+                    onClick = { if (page == pageCount - 1) finish() else page++ },
+                    enabled = when {
+                        page == 0 -> true
+                        page == 1 -> keyReleased
+                        page == 2 -> serviceReady
+                        screenOffEnabled && page == 3 -> screenOffReady
                         else -> true
                     },
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(vertical = 14.dp),
                 ) {
-                    Text(if (page == 2) language.t("DONE", "ГОТОВО") else language.t("NEXT", "ДАЛЕЕ"))
+                    Text(if (page == pageCount - 1) language.t("DONE", "ГОТОВО") else language.t("NEXT", "ДАЛЕЕ"))
                 }
             }
         }
@@ -338,7 +372,81 @@ private fun OnboardingScreen(
 }
 
 @Composable
-private fun ReleaseKeyStep(
+private fun ModeChoiceStep(
+    language: AppLanguage,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    openSetupVideo: () -> Unit,
+) {
+    StepHeading(
+        "00",
+        language.t("Choose setup mode", "Выберите режим работы"),
+        language.t(
+            "You can change this later in Settings.",
+            "Это можно изменить позже в настройках.",
+        ),
+    )
+    Spacer(Modifier.height(22.dp))
+    ModeOption(
+        language = language,
+        selected = !screenOffEnabled,
+        title = language.t("Screen on", "Только включённый экран"),
+        detail = language.t(
+            "Simpler setup. Nothing needs to be reactivated after a phone reboot.",
+            "Проще настройка. После перезагрузки телефона ничего повторно активировать не нужно.",
+        ),
+        onClick = { setScreenOffEnabled(false) },
+    )
+    Spacer(Modifier.height(10.dp))
+    ModeOption(
+        language = language,
+        selected = screenOffEnabled,
+        title = language.t("Screen on + off", "Включённый + выключенный экран"),
+        detail = language.t(
+            "Adds the sleep monitor. It must be restarted through Wireless debugging after every phone reboot.",
+            "Добавляет монитор сна. После каждой перезагрузки телефона его нужно перезапустить через Wireless debugging.",
+        ),
+        onClick = { setScreenOffEnabled(true) },
+    )
+    Spacer(Modifier.height(16.dp))
+    OutlinedButton(onClick = openSetupVideo, modifier = Modifier.fillMaxWidth()) {
+        Text(language.t("VIDEO SETUP GUIDE", "ВИДЕО ИНСТРУКЦИЯ ПО НАСТРОЙКЕ"), textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+private fun ModeOption(
+    language: AppLanguage,
+    selected: Boolean,
+    title: String,
+    detail: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = CircleShape,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    if (selected) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+            }
+            Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold)
+                Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BaseSetupStep(
     language: AppLanguage,
     state: MapperUiState,
     pairingCode: String,
@@ -353,33 +461,17 @@ private fun ReleaseKeyStep(
 ) {
     StepHeading(
         "01",
-        language.t("Release the key", "Освободите кнопку"),
+        language.t("Release Essential Key", "Освободите Essential Key"),
         language.t(
-            "Essential Space must stop intercepting the button. Its data is not deleted and the change is reversible.",
-            "Essential Space должен перестать перехватывать кнопку. Данные не удаляются, изменение обратимо.",
+            "Essential Remap disables the two Nothing components that currently own the button. Their data is kept and the change can be restored later.",
+            "Essential Remap отключит два компонента Nothing, которые сейчас забирают кнопку. Их данные сохранятся, а изменение можно будет откатить.",
         ),
     )
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(22.dp))
     StatusCard(
         success = state.setup.packageStatus == NothingPackageStatus.DISABLED,
         title = packageStatusTitle(language, state.setup.packageStatus),
-        detail = language.t(
-            "Nothing packages: Essential Space + Essential Recorder",
-            "Пакеты Nothing: Essential Space + Essential Recorder",
-        ),
-    )
-    Spacer(Modifier.height(10.dp))
-    StatusCard(
-        success = state.setup.screenOffAccessGranted,
-        title = if (state.setup.screenOffAccessGranted) {
-            language.t("Sleep monitor is running", "Монитор сна работает")
-        } else {
-            language.t("Sleep monitor needs setup", "Нужно запустить монитор сна")
-        },
-        detail = language.t(
-            "Shell UID, scan code 250 only, no idle wake lock",
-            "UID shell, только scan code 250, без удержания процессора",
-        ),
+        detail = language.t("Essential Space and Essential Recorder", "Essential Space и Essential Recorder"),
     )
     Spacer(Modifier.height(14.dp))
     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
@@ -394,27 +486,17 @@ private fun ReleaseKeyStep(
             clearDiagnostics,
         )
     }
-    if ((state.setup.packageStatus != NothingPackageStatus.DISABLED ||
-            !state.setup.screenOffAccessGranted) && !state.setup.busy
-    ) {
+    if (state.setup.packageStatus != NothingPackageStatus.DISABLED && !state.setup.busy) {
         Button(
             onClick = { beginPackageSetup(PackageOperation.DISABLE) },
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 14.dp),
-        ) {
-            Text(
-                if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
-                    language.t("START SLEEP MONITOR", "ЗАПУСТИТЬ МОНИТОР СНА")
-                } else {
-                    language.t("SET UP WITH WIRELESS ADB", "НАСТРОИТЬ ЧЕРЕЗ WIRELESS ADB")
-                },
-            )
-        }
+        ) { Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ КНОПКУ")) }
         TextButton(onClick = openDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
             Text(language.t("Open developer options", "Открыть настройки разработчика"))
         }
     }
-    ManualCommands(language, copyText)
+    ManualCommands(language, copyText, includeSleepMonitor = false)
 }
 
 @Composable
@@ -425,25 +507,25 @@ private fun AccessibilityStep(
 ) {
     StepHeading(
         "02",
-        language.t("Allow key listener", "Разрешите перехват кнопки"),
+        language.t("Enable Essential Remap", "Включите Essential Remap"),
         language.t(
-            "Android exposes global hardware keys through Accessibility Service. Essential Remap consumes only scan code 250 and can reproduce a navigation-handle hold only for Circle to Search. It cannot read screen content and does not send data.",
-            "Android даёт глобальный доступ к аппаратным клавишам через службу специальных возможностей. Essential Remap обрабатывает только scan code 250 и может воспроизвести удержание нижней полоски только для Circle to Search. Приложение не читает экран и не отправляет данные.",
+            "Accessibility lets the app receive the Essential Key while Android is in use. Essential Remap does not read screen content.",
+            "Специальные возможности позволяют приложению получать нажатия Essential Key во время работы Android. Essential Remap не читает содержимое экрана.",
         ),
     )
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(22.dp))
     StatusCard(
         success = state.serviceEnabled,
-        title = if (state.serviceEnabled) language.t("Listener is enabled", "Служба включена")
-        else language.t("Listener is disabled", "Служба выключена"),
-        detail = language.t("Hardware key events only", "Только события аппаратной кнопки"),
+        title = if (state.serviceEnabled) language.t("Service enabled", "Служба включена")
+        else language.t("Service disabled", "Служба выключена"),
+        detail = language.t("Required for remapping", "Нужно для переназначения кнопки"),
     )
     if (state.competingServices.isNotEmpty()) {
         Spacer(Modifier.height(12.dp))
         WarningCard(
             language.t(
-                "Another key-filtering service is active: ${state.competingServices.joinToString()}. Disable its Essential Key mapping to prevent conflicts.",
-                "Активна другая служба перехвата клавиш: ${state.competingServices.joinToString()}. Отключите в ней переназначение Essential Key.",
+                "Another key remapper is active: ${state.competingServices.joinToString()}. Disable its Essential Key rule to avoid duplicate actions.",
+                "Активен другой переназначатель кнопок: ${state.competingServices.joinToString()}. Отключите в нём правило Essential Key, чтобы действия не дублировались.",
             ),
         )
     }
@@ -452,20 +534,81 @@ private fun AccessibilityStep(
         onClick = openAccessibilitySettings,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(vertical = 14.dp),
-    ) { Text(language.t("OPEN ACCESSIBILITY SETTINGS", "ОТКРЫТЬ СПЕЦИАЛЬНЫЕ ВОЗМОЖНОСТИ")) }
+    ) { Text(language.t("OPEN ACCESSIBILITY", "ОТКРЫТЬ СПЕЦИАЛЬНЫЕ ВОЗМОЖНОСТИ"), textAlign = TextAlign.Center) }
 }
 
 @Composable
-private fun ReadyStep(language: AppLanguage) {
+private fun SleepSetupStep(
+    language: AppLanguage,
+    state: MapperUiState,
+    pairingCode: String,
+    changePairingCode: (String) -> Unit,
+    beginPackageSetup: (PackageOperation) -> Unit,
+    submitPairingCode: (String) -> Unit,
+    cancelPackageSetup: () -> Unit,
+    copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
+) {
     StepHeading(
         "03",
-        language.t("Ready", "Готово"),
+        language.t("Enable screen-off handling", "Включите работу с выключенным экраном"),
         language.t(
-            "The button now works with the display on or off. Change any mapping on the next screen.",
-            "Теперь кнопка работает с включённым и погашенным экраном. Любое действие можно поменять на следующем экране.",
+            "The sleep monitor runs with Android's shell privileges and listens only for Essential Key. It does not hold a wake lock. After a phone reboot it must be restarted.",
+            "Монитор сна запускается с правами Android shell и слушает только Essential Key. Он не удерживает процессор активным. После перезагрузки телефона его нужно перезапустить.",
         ),
     )
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(22.dp))
+    StatusCard(
+        success = state.setup.screenOffAccessGranted,
+        title = if (state.setup.screenOffAccessGranted) {
+            language.t("Sleep monitor is running", "Монитор сна работает")
+        } else {
+            language.t("Sleep monitor is not running", "Монитор сна не запущен")
+        },
+        detail = language.t("Required only with the display off", "Нужен только при выключенном экране"),
+    )
+    Spacer(Modifier.height(14.dp))
+    if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
+        SetupProgress(
+            language,
+            state,
+            pairingCode,
+            changePairingCode,
+            submitPairingCode,
+            cancelPackageSetup,
+            copyDiagnostics,
+            clearDiagnostics,
+        )
+    }
+    if (!state.setup.screenOffAccessGranted && !state.setup.busy) {
+        Button(
+            onClick = { beginPackageSetup(PackageOperation.INSTALL_SLEEP_MONITOR) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 14.dp),
+        ) { Text(language.t("INSTALL SLEEP MONITOR", "УСТАНОВИТЬ МОНИТОР СНА"), textAlign = TextAlign.Center) }
+    }
+    ManualCommands(language, copyText, includeSleepMonitor = true)
+}
+
+@Composable
+private fun ReadyStep(language: AppLanguage, screenOffEnabled: Boolean) {
+    StepHeading(
+        if (screenOffEnabled) "04" else "03",
+        language.t("Ready", "Готово"),
+        if (screenOffEnabled) {
+            language.t(
+                "Essential Key is ready with the display on and off. After a phone reboot, restart the sleep monitor from Settings.",
+                "Essential Key готова к работе с включённым и выключенным экраном. После перезагрузки телефона перезапустите монитор сна в настройках.",
+            )
+        } else {
+            language.t(
+                "Essential Key is ready while the display is on. You can enable screen-off handling later in Settings.",
+                "Essential Key готова к работе при включённом экране. Работу с выключенным экраном можно включить позже в настройках.",
+            )
+        },
+    )
+    Spacer(Modifier.height(22.dp))
     StatusCard(true, language.t("Single press", "Одно нажатие"), language.t("Voice assistant", "Голосовой помощник"))
     Spacer(Modifier.height(10.dp))
     StatusCard(true, language.t("Double press", "Двойное нажатие"), "Circle to Search")
@@ -527,8 +670,8 @@ private fun SetupProgress(
             if (state.setup.phase == SetupPhase.ERROR) {
                 Text(
                     language.t(
-                        "Copy the diagnostic log after reproducing the error.",
-                        "После появления ошибки скопируйте журнал диагностики.",
+                        "Copy the log if the problem repeats.",
+                        "Если ошибка повторяется, скопируйте лог.",
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
@@ -548,38 +691,30 @@ private fun DiagnosticsActions(
     clearDiagnostics: () -> Unit,
 ) {
     var cleared by rememberSaveable { mutableStateOf(false) }
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         OutlinedButton(
             onClick = {
                 cleared = false
                 copyDiagnostics()
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                language.t("COPY DIAGNOSTIC LOG", "СКОПИРОВАТЬ ЖУРНАЛ"),
-                textAlign = TextAlign.Center,
-            )
-        }
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+        ) { Text(language.t("COPY LOG", "КОПИРОВАТЬ ЛОГ"), textAlign = TextAlign.Center) }
         OutlinedButton(
             onClick = {
                 clearDiagnostics()
                 cleared = true
             },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                language.t("CLEAR DIAGNOSTIC LOG", "ОЧИСТИТЬ ЖУРНАЛ"),
-                textAlign = TextAlign.Center,
-            )
-        }
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+        ) { Text(language.t("CLEAR LOG", "ОЧИСТИТЬ ЛОГ"), textAlign = TextAlign.Center) }
     }
     if (cleared) {
         Text(
-            language.t("Diagnostic log cleared", "Журнал диагностики очищен"),
+            language.t("Log cleared", "Лог очищен"),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 6.dp),
@@ -588,8 +723,12 @@ private fun DiagnosticsActions(
 }
 
 @Composable
-private fun ManualCommands(language: AppLanguage, copyText: (String) -> Unit) {
-    val commands = remember { ShellKeyMonitorCommands.manualAdbCommands() }
+private fun ManualCommands(
+    language: AppLanguage,
+    copyText: (String) -> Unit,
+    includeSleepMonitor: Boolean,
+) {
+    val commands = remember(includeSleepMonitor) { ShellKeyMonitorCommands.manualAdbCommands(includeSleepMonitor) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
         Text(language.t("Manual ADB commands", "Команды ADB вручную"))
@@ -609,6 +748,9 @@ private fun HomeScreen(
     language: AppLanguage,
     state: MapperUiState,
     snackbar: SnackbarHostState,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    initiallyOpenSettings: Boolean,
     openAccessibilitySettings: () -> Unit,
     openNotificationPolicySettings: () -> Unit,
     openDeveloperOptions: () -> Unit,
@@ -641,7 +783,7 @@ private fun HomeScreen(
     var urlGesture by remember { mutableStateOf<PressAction?>(null) }
     var httpGesture by remember { mutableStateOf<PressAction?>(null) }
     var soundGesture by remember { mutableStateOf<PressAction?>(null) }
-    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable { mutableStateOf(initiallyOpenSettings) }
     val setupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
     val ready = setupReady && state.settings.remappingEnabled
 
@@ -708,6 +850,7 @@ private fun HomeScreen(
                     gesture = gesture,
                     action = state.draftActions.getValue(gesture),
                     runWhileLocked = state.draftRunWhileLocked[gesture] == true,
+                    screenOffEnabled = screenOffEnabled,
                     onClick = { actionGesture = gesture },
                     onRunWhileLockedChanged = { updateRunWhileLocked(gesture, it) },
                 )
@@ -783,6 +926,8 @@ private fun HomeScreen(
             copyText,
             copyDiagnostics,
             clearDiagnostics,
+            screenOffEnabled,
+            setScreenOffEnabled,
             changeLanguage,
             runSetupAgain,
             setRemappingEnabled,
@@ -796,6 +941,7 @@ private fun GestureCard(
     gesture: PressAction,
     action: ConfiguredAction,
     runWhileLocked: Boolean,
+    screenOffEnabled: Boolean,
     onClick: () -> Unit,
     onRunWhileLockedChanged: (Boolean) -> Unit,
 ) {
@@ -834,7 +980,11 @@ private fun GestureCard(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        language.t("Includes screen off", "Включая погашенный экран"),
+                        if (screenOffEnabled) {
+                            language.t("Lock screen and display off", "Блокировка и выключенный экран")
+                        } else {
+                            language.t("While the lock screen is visible", "Пока экран блокировки виден")
+                        },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -1079,37 +1229,47 @@ private fun SettingsDialog(
     copyText: (String) -> Unit,
     copyDiagnostics: () -> Unit,
     clearDiagnostics: () -> Unit,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
     changeLanguage: (AppLanguage) -> Unit,
     runSetupAgain: () -> Unit,
     setRemappingEnabled: (Boolean) -> Unit,
 ) {
     var pairingCode by rememberSaveable { mutableStateOf("") }
-    Dialog(onDismissRequest = dismiss) {
-        Surface(shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+    Dialog(
+        onDismissRequest = dismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.94f).widthIn(max = 680.dp),
+        ) {
             Column {
                 DialogHeader(language.t("Settings", "Настройки"), dismiss)
                 Column(
-                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     SectionLabel(language.t("KEY STATUS", "СОСТОЯНИЕ КНОПКИ"))
                     StatusCard(
                         state.setup.packageStatus == NothingPackageStatus.DISABLED,
                         packageStatusTitle(language, state.setup.packageStatus),
-                        language.t("Essential Space package state", "Состояние пакетов Essential Space"),
+                        language.t("Essential Space and Essential Recorder", "Essential Space и Essential Recorder"),
                     )
-                    StatusCard(
-                        state.setup.screenOffAccessGranted,
-                        if (state.setup.screenOffAccessGranted) {
-                            language.t("Sleep monitor is running", "Монитор сна работает")
-                        } else {
-                            language.t("Sleep monitor needs restart", "Нужно запустить монитор сна")
-                        },
-                        language.t(
-                            "No idle wake lock; restart it here after a phone reboot",
-                            "Без удержания процессора; после перезагрузки запустите здесь снова",
-                        ),
-                    )
+                    if (screenOffEnabled) {
+                        StatusCard(
+                            state.setup.screenOffAccessGranted,
+                            if (state.setup.screenOffAccessGranted) {
+                                language.t("Sleep monitor is running", "Монитор сна работает")
+                            } else {
+                                language.t("Sleep monitor needs restart", "Монитор сна нужно перезапустить")
+                            },
+                            language.t(
+                                "Required with the display off; restart after every phone reboot",
+                                "Нужен при выключенном экране; после перезагрузки телефона требуется перезапуск",
+                            ),
+                        )
+                    }
                     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR) {
                         SetupProgress(
                             language,
@@ -1122,28 +1282,40 @@ private fun SettingsDialog(
                             clearDiagnostics,
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
-                            OutlinedButton(onClick = { beginPackageSetup(PackageOperation.RESTORE) }, modifier = Modifier.weight(1f)) {
-                                Text(language.t("RESTORE SPACE", "ВЕРНУТЬ SPACE"), textAlign = TextAlign.Center)
-                            }
-                            Button(onClick = { beginPackageSetup(PackageOperation.DISABLE) }, modifier = Modifier.weight(1f)) {
-                                Text(
-                                    if (state.setup.screenOffAccessGranted) {
-                                        language.t("RESTART MONITOR", "ПЕРЕЗАПУСТИТЬ")
-                                    } else {
-                                        language.t("START MONITOR", "ЗАПУСТИТЬ")
-                                    },
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
-                        } else {
-                            Button(onClick = { beginPackageSetup(PackageOperation.DISABLE) }, modifier = Modifier.fillMaxWidth()) {
-                                Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ"))
+                    if (!state.setup.busy) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (state.setup.packageStatus == NothingPackageStatus.DISABLED) {
+                                OutlinedButton(
+                                    onClick = { beginPackageSetup(PackageOperation.RESTORE) },
+                                    modifier = Modifier.weight(1f),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+                                ) { Text(language.t("RESTORE", "ОТКАТИТЬ"), maxLines = 1, textAlign = TextAlign.Center) }
+                                if (screenOffEnabled) {
+                                    Button(
+                                        onClick = { beginPackageSetup(PackageOperation.INSTALL_SLEEP_MONITOR) },
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+                                    ) {
+                                        Text(
+                                            if (state.setup.screenOffAccessGranted) {
+                                                language.t("RESTART", "ПЕРЕЗАПУСК")
+                                            } else {
+                                                language.t("START", "ЗАПУСТИТЬ")
+                                            },
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = { beginPackageSetup(PackageOperation.DISABLE) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ КНОПКУ"), textAlign = TextAlign.Center) }
                             }
                         }
                     }
-                    ManualCommands(language, copyText)
+                    ManualCommands(language, copyText, includeSleepMonitor = screenOffEnabled)
                     HorizontalDivider()
                     SectionLabel(language.t("BUTTON", "КНОПКА"))
                     SettingsSwitchRow(
@@ -1156,15 +1328,32 @@ private fun SettingsDialog(
                         checked = state.settings.remappingEnabled,
                         onCheckedChange = setRemappingEnabled,
                     )
+                    SettingsSwitchRow(
+                        title = language.t("Work with screen off", "Работать на выкл. экране"),
+                        subtitle = if (screenOffEnabled) {
+                            language.t(
+                                "Uses the sleep monitor; restart it after a phone reboot",
+                                "Использует монитор сна; после перезагрузки телефона нужен перезапуск",
+                            )
+                        } else {
+                            language.t("Only while the display is on", "Только при включённом экране")
+                        },
+                        checked = screenOffEnabled,
+                        onCheckedChange = setScreenOffEnabled,
+                    )
                     HorizontalDivider()
                     SectionLabel(language.t("PERMISSIONS", "РАЗРЕШЕНИЯ"))
                     SettingsRow(
-                        language.t("Accessibility listener", "Служба специальных возможностей"),
-                        if (state.serviceEnabled) language.t("Enabled", "Включена") else language.t("Disabled", "Выключена"),
+                        language.t("Accessibility", "Специальные возможности"),
+                        if (state.serviceEnabled) language.t("Enabled", "Включены") else language.t("Disabled", "Выключены"),
                         openAccessibilitySettings,
                     )
                     SettingsRow(language.t("Default assistant", "Помощник по умолчанию"), "Google / Gemini", openAssistantSettings)
-                    SettingsRow(language.t("Do Not Disturb access", "Доступ к режиму «Не беспокоить»"), language.t("Needed only for Silent mode", "Нужен только для беззвучного режима"), openNotificationPolicySettings)
+                    SettingsRow(
+                        language.t("Do Not Disturb access", "Доступ к «Не беспокоить»"),
+                        language.t("Only needed for Silent mode", "Нужен только для беззвучного режима"),
+                        openNotificationPolicySettings,
+                    )
                     HorizontalDivider()
                     SectionLabel(language.t("LANGUAGE", "ЯЗЫК"))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1175,22 +1364,14 @@ private fun SettingsDialog(
                     SectionLabel(language.t("APP", "ПРИЛОЖЕНИЕ"))
                     SettingsRow(language.t("Run setup again", "Повторить первоначальную настройку"), null) { dismiss(); runSetupAgain() }
                     SettingsRow(language.t("Android app info", "Информация о приложении"), null, openAppInfo)
-                    HorizontalDivider()
-                    SectionLabel(language.t("DIAGNOSTICS", "ДИАГНОСТИКА"))
-                    Text(
+                    DangerWarningCard(
                         language.t(
-                            "For a screen-off failure: clear the log, let the phone fully sleep, press Essential Key once, unlock with Power, then copy the log. Pairing codes, private keys and action URLs are never recorded.",
-                            "Если кнопка не работает во сне: очистите журнал, дождитесь полного засыпания, один раз нажмите Essential Key, разблокируйте телефон кнопкой питания и скопируйте журнал. Коды сопряжения, закрытые ключи и адреса действий не записываются.",
+                            "Restore Essential Space before uninstalling Essential Remap. Uninstalling the APK alone does not re-enable Nothing's components.",
+                            "Перед удалением Essential Remap нажмите «Откатить», чтобы вернуть Essential Space. Простое удаление APK не включит компоненты Nothing обратно.",
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
                     )
-                    DiagnosticsActions(language, copyDiagnostics, clearDiagnostics)
-                    WarningCard(language.t(
-                        "Restore Essential Space before uninstalling. Removing this app alone does not re-enable Nothing's packages.",
-                        "Перед удалением верните Essential Space. Удаление приложения само по себе не включит пакеты Nothing.",
-                    ))
                     SettingsRow("Donate", "github.com/AbdulKus/donate", openDonate)
+                    DiagnosticsActions(language, copyDiagnostics, clearDiagnostics)
                     Spacer(Modifier.height(12.dp))
                 }
             }
@@ -1222,7 +1403,7 @@ private fun StatusCard(success: Boolean, title: String, detail: String) {
                     Icon(if (success) Icons.Default.Check else Icons.Default.Warning, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                 }
             }
-            Column(Modifier.padding(start = 12.dp)) {
+            Column(Modifier.padding(start = 12.dp).weight(1f)) {
                 Text(title, fontWeight = FontWeight.SemiBold)
                 Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
@@ -1242,6 +1423,21 @@ private fun WarningCard(text: String, action: (() -> Unit)? = null) {
             Icon(Icons.Default.Warning, contentDescription = null)
             Text(text, modifier = Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.bodySmall)
             if (action != null) Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+        }
+    }
+}
+
+@Composable
+private fun DangerWarningCard(text: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Warning, contentDescription = null)
+            Text(text, modifier = Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.bodySmall)
         }
     }
 }

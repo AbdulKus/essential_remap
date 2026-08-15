@@ -24,6 +24,9 @@ object ScreenOffKeyAccess {
             preferences.getInt(KEY_MONITOR_REVISION, -1) == ShellKeyMonitorCommands.REVISION
     }
 
+    fun wasConfigured(context: Context): Boolean =
+        preferences(context).getBoolean(KEY_STARTED, false)
+
     fun markStarted(context: Context) {
         preferences(context).edit()
             .putBoolean(KEY_STARTED, true)

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
+import com.abdulkus.essentialremap.ui.UserPreferences
 
 /** Receives only explicit, DUMP-protected events emitted by the ADB shell monitor. */
 class ShellKeyEventReceiver : BroadcastReceiver() {
@@ -14,6 +15,10 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
             ?.container?.diagnostics ?: SetupDiagnostics(context)
         if (intent.action != ACTION) {
             diagnostics.log("Runtime receiver: rejected unexpected intent action=${intent.action}")
+            return
+        }
+        if (!UserPreferences(context).screenOffEnabled) {
+            diagnostics.log("Runtime receiver: ignored because screen-off handling is disabled")
             return
         }
         val senderUid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

@@ -42,30 +42,33 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         val operation = pendingPackageOperation.also { pendingPackageOperation = null }
-        if (granted && operation != null) {
+        if (operation != null) {
+            if (!granted) {
+                val russian = userPreferences.language == AppLanguage.RUSSIAN
+                Toast.makeText(
+                    this,
+                    if (russian) {
+                        "Без уведомлений код сопряжения придётся вводить после возврата в приложение"
+                    } else {
+                        "Without notifications, enter a pairing code after returning to the app"
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
             startWirelessSetup(operation)
-        } else if (!granted) {
-            val russian = userPreferences.language == AppLanguage.RUSSIAN
-            Toast.makeText(
-                this,
-                if (russian) {
-                    "Уведомление нужно, чтобы ввести код, не закрывая окно сопряжения Android"
-                } else {
-                    "Notification access keeps Android's pairing window open while you enter the code"
-                },
-                Toast.LENGTH_LONG,
-            ).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val initiallyOpenSettings = intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)
         setContent {
             EssentialRemapTheme {
                 EssentialRemapApp(
                     viewModel = viewModel,
                     preferences = userPreferences,
+                    initiallyOpenSettings = initiallyOpenSettings,
                     openAccessibilitySettings = {
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     },
@@ -82,12 +85,10 @@ class MainActivity : ComponentActivity() {
                         )
                     },
                     openDonate = {
-                        startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse("https://github.com/AbdulKus/donate"),
-                            ),
-                        )
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/AbdulKus/donate")))
+                    },
+                    openSetupVideo = {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/")))
                     },
                     beginPackageSetup = ::beginPackageSetup,
                     copyText = ::copyToClipboard,
@@ -119,15 +120,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startWirelessSetup(operation: PackageOperation) {
+        // The coordinator first tries the persisted ADB identity. It opens Wireless debugging
+        // settings only when the service is unavailable or pairing is actually required.
         viewModel.startPackageSetup(operation)
-        val wirelessDebugging = Intent(ACTION_WIRELESS_DEBUGGING_SETTINGS)
-        startActivity(
-            if (wirelessDebugging.resolveActivity(packageManager) != null) {
-                wirelessDebugging
-            } else {
-                developerOptionsIntent()
-            },
-        )
     }
 
     private fun developerOptionsIntent() =
@@ -166,19 +161,15 @@ class MainActivity : ComponentActivity() {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(
             ClipData.newPlainText("Essential Remap", text),
         )
-        val message = if (userPreferences.language == AppLanguage.RUSSIAN) {
-            "Скопировано"
-        } else {
-            "Copied"
-        }
+        val message = if (userPreferences.language == AppLanguage.RUSSIAN) "Скопировано" else "Copied"
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    private companion object {
-        const val ACTION_WIRELESS_DEBUGGING_SETTINGS = "android.settings.WIRELESS_DEBUGGING_SETTINGS"
-        const val ACTION_NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS =
+    companion object {
+        const val EXTRA_OPEN_SETTINGS = "open_settings"
+        private const val ACTION_NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS =
             "android.settings.NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS"
-        const val SETTINGS_FRAGMENT_ARGUMENT_KEY = ":settings:fragment_args_key"
-        const val WIRELESS_DEBUGGING_PREFERENCE_KEY = "toggle_adb_wireless"
+        private const val SETTINGS_FRAGMENT_ARGUMENT_KEY = ":settings:fragment_args_key"
+        private const val WIRELESS_DEBUGGING_PREFERENCE_KEY = "toggle_adb_wireless"
     }
 }
