@@ -3,12 +3,34 @@ package com.abdulkus.essentialremap.ui
 import android.content.Context
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
 
-enum class AppLanguage(val code: String) {
-    ENGLISH("en"),
-    RUSSIAN("ru");
+enum class AppLanguage(
+    val code: String,
+    val shortLabel: String,
+    val nativeName: String,
+) {
+    ENGLISH("en", "EN", "English"),
+    RUSSIAN("ru", "RU", "Русский"),
+    GERMAN("de", "DE", "Deutsch"),
+    FRENCH("fr", "FR", "Français"),
+    POLISH("pl", "PL", "Polski"),
+    UKRAINIAN("uk", "UA", "Українська"),
+    INDONESIAN("id", "IN", "Bahasa Indonesia"),
+    CHINESE("zh", "CH", "中文"),
+    JAPANESE("ja", "JP", "日本語"),
+    KOREAN("ko", "KO", "한국어");
 
     companion object {
-        fun fromCode(code: String?): AppLanguage? = entries.firstOrNull { it.code == code }
+        fun fromCode(code: String?): AppLanguage? {
+            val normalized = code?.trim()?.lowercase() ?: return null
+            return entries.firstOrNull { it.code == normalized } ?: when (normalized) {
+                "ua" -> UKRAINIAN
+                "in" -> INDONESIAN
+                "ch", "cn" -> CHINESE
+                "jp" -> JAPANESE
+                "kr" -> KOREAN
+                else -> null
+            }
+        }
     }
 }
 
