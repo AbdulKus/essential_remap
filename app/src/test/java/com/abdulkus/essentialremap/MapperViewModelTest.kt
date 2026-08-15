@@ -148,24 +148,6 @@ class MapperViewModelTest {
     }
 
     @Test
-    fun turnScreenOffAfterWakeOptionRemainsDraftUntilSave() = runTest(dispatcher) {
-        val repository = FakeRepository()
-        val viewModel = MapperViewModel(repository, FakeHapticEngine(), FakeSetup())
-        advanceUntilIdle()
-
-        viewModel.updateTurnScreenOffAfterWake(PressAction.LONG, true)
-
-        assertTrue(viewModel.uiState.value.dirty)
-        assertFalse(repository.state.value.turnScreenOffAfterWake.getValue(PressAction.LONG))
-
-        viewModel.save()
-        advanceUntilIdle()
-
-        assertTrue(repository.state.value.turnScreenOffAfterWake.getValue(PressAction.LONG))
-        assertFalse(viewModel.uiState.value.dirty)
-    }
-
-    @Test
     fun keyDetectionRequiresReleasedPackageAndAccessibility() = runTest(dispatcher) {
         val setup = FakeSetup()
         val viewModel = MapperViewModel(FakeRepository(), FakeHapticEngine(), setup)
@@ -238,13 +220,11 @@ class MapperViewModelTest {
             hapticStrength: HapticStrength,
             actions: Map<PressAction, ConfiguredAction>,
             runWhileLocked: Map<PressAction, Boolean>,
-            turnScreenOffAfterWake: Map<PressAction, Boolean>,
         ) {
             state.value = state.value.copy(
                 hapticStrength = hapticStrength,
                 actions = actions,
                 runWhileLocked = runWhileLocked,
-                turnScreenOffAfterWake = turnScreenOffAfterWake,
             )
         }
 

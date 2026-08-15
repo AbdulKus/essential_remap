@@ -37,8 +37,6 @@ data class MapperUiState(
     val draftHapticStrength: HapticStrength = HapticStrength.MEDIUM,
     val draftActions: Map<PressAction, ConfiguredAction> = AppSettings.defaultActions(),
     val draftRunWhileLocked: Map<PressAction, Boolean> = AppSettings.defaultRunWhileLocked(),
-    val draftTurnScreenOffAfterWake: Map<PressAction, Boolean> =
-        AppSettings.defaultTurnScreenOffAfterWake(),
     val serviceEnabled: Boolean = false,
     val competingServices: List<String> = emptyList(),
     val setup: EssentialKeySetupState = EssentialKeySetupState(),
@@ -53,8 +51,7 @@ data class MapperUiState(
     val dirty: Boolean get() =
         draftHapticStrength != settings.hapticStrength ||
             draftActions != settings.actions ||
-            draftRunWhileLocked != settings.runWhileLocked ||
-            draftTurnScreenOffAfterWake != settings.turnScreenOffAfterWake
+            draftRunWhileLocked != settings.runWhileLocked
 
     val keyReleased: Boolean get() = setup.packageStatus == NothingPackageStatus.DISABLED
     val readyToMap: Boolean get() =
@@ -88,11 +85,6 @@ class MapperViewModel(
                             current.draftRunWhileLocked
                         } else {
                             settings.runWhileLocked
-                        },
-                        draftTurnScreenOffAfterWake = if (preserveDraft) {
-                            current.draftTurnScreenOffAfterWake
-                        } else {
-                            settings.turnScreenOffAfterWake
                         },
                         initialized = true,
                     )
@@ -218,15 +210,6 @@ class MapperViewModel(
         }
     }
 
-    fun updateTurnScreenOffAfterWake(gesture: PressAction, enabled: Boolean) {
-        _uiState.update { current ->
-            current.copy(
-                draftTurnScreenOffAfterWake =
-                    current.draftTurnScreenOffAfterWake + (gesture to enabled),
-            )
-        }
-    }
-
     fun setRemappingEnabled(enabled: Boolean) {
         viewModelScope.launch {
             runCatching { repository.setRemappingEnabled(enabled) }
@@ -262,7 +245,6 @@ class MapperViewModel(
                     hapticStrength = _uiState.value.draftHapticStrength,
                     actions = _uiState.value.draftActions,
                     runWhileLocked = _uiState.value.draftRunWhileLocked,
-                    turnScreenOffAfterWake = _uiState.value.draftTurnScreenOffAfterWake,
                 )
             }
                 .onSuccess { _messages.emit("Actions saved") }

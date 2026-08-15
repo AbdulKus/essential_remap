@@ -44,15 +44,12 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         hapticStrength: HapticStrength,
         actions: Map<PressAction, ConfiguredAction>,
         runWhileLocked: Map<PressAction, Boolean>,
-        turnScreenOffAfterWake: Map<PressAction, Boolean>,
     ) {
         dataStore.edit { preferences ->
             preferences[Keys.COMMON_HAPTIC] = hapticStrength.name
             PressAction.entries.forEach { action ->
                 writeAction(preferences, action, actions.getValue(action))
                 preferences[Keys.runWhileLocked(action)] = runWhileLocked[action] == true
-                preferences[Keys.turnScreenOffAfterWake(action)] =
-                    turnScreenOffAfterWake[action] == true
             }
         }
     }
@@ -142,9 +139,6 @@ internal fun preferencesToSettings(preferences: Preferences): AppSettings {
     val runWhileLocked = PressAction.entries.associateWith { gesture ->
         preferences[Keys.runWhileLocked(gesture)] ?: false
     }
-    val turnScreenOffAfterWake = PressAction.entries.associateWith { gesture ->
-        preferences[Keys.turnScreenOffAfterWake(gesture)] ?: false
-    }
     val results = PressAction.entries.associateWith { preferences[Keys.result(it)] }
     val commonHaptic = (
         preferences[Keys.COMMON_HAPTIC] ?: preferences[Keys.haptic(PressAction.SINGLE)]
@@ -155,7 +149,6 @@ internal fun preferencesToSettings(preferences: Preferences): AppSettings {
         hapticStrength = commonHaptic,
         actions = actions,
         runWhileLocked = runWhileLocked,
-        turnScreenOffAfterWake = turnScreenOffAfterWake,
         results = results,
         learning = preferences[Keys.LEARNING] ?: false,
     )
@@ -221,8 +214,6 @@ private object Keys {
     fun actionLabel(action: PressAction) = stringPreferencesKey("${action.name}_action_label")
     fun actionBaseUrl(action: PressAction) = stringPreferencesKey("${action.name}_http_base_url")
     fun runWhileLocked(action: PressAction) = booleanPreferencesKey("${action.name}_run_while_locked")
-    fun turnScreenOffAfterWake(action: PressAction) =
-        booleanPreferencesKey("${action.name}_turn_screen_off_after_wake")
     fun method(action: PressAction) = stringPreferencesKey("${action.name}_method")
     fun url(action: PressAction) = stringPreferencesKey("${action.name}_url")
     fun haptic(action: PressAction) = stringPreferencesKey("${action.name}_haptic")

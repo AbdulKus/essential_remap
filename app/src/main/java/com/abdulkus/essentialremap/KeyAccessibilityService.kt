@@ -19,7 +19,6 @@ import com.abdulkus.essentialremap.domain.AppSettings
 import com.abdulkus.essentialremap.domain.ConfiguredAction
 import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
-import com.abdulkus.essentialremap.domain.ScreenOffAfterWakePolicy
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import java.time.Instant
@@ -27,7 +26,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,8 +79,7 @@ class KeyAccessibilityService : AccessibilityService() {
                         "settings ${if (firstLoad) "loaded" else "updated"}: " +
                             "enabled=${settings.remappingEnabled} " +
                             "actions=${settings.actions.safeSummary()} " +
-                            "runWhileLocked=${settings.runWhileLocked.enabledSummary()} " +
-                            "turnOffAfterWake=${settings.turnScreenOffAfterWake.enabledSummary()}",
+                            "runWhileLocked=${settings.runWhileLocked.enabledSummary()}",
                     )
                     if (!shellListenerAttached) {
                         val queuedEvents = ShellKeyEventBus.attach(shellKeyListener)
@@ -185,20 +182,12 @@ class KeyAccessibilityService : AccessibilityService() {
             return
         }
         val config = currentSettings.actions.getValue(action)
-        val turnScreenOffAfterWake = ScreenOffAfterWakePolicy.shouldTurnOff(
-            action = action,
-            startedScreenOff = startedScreenOff,
-            turnScreenOffAfterWake = currentSettings.turnScreenOffAfterWake,
-        )
         if (!ActionFeedbackPolicy.shouldPerformHaptic(config)) {
             trace("action skipped: press=$action configured=NONE")
             releaseWakeLock(wakeLock)
             return
         }
-        trace(
-            "action dispatch: press=$action configured=${config.safeName()} " +
-                "turnScreenOffAfterWake=$turnScreenOffAfterWake",
-        )
+        trace("action dispatch: press=$action configured=${config.safeName()}")
         hapticEngine.perform(currentSettings.hapticStrength)
         serviceScope.launch {
             try {
@@ -211,18 +200,6 @@ class KeyAccessibilityService : AccessibilityService() {
                     "action result: press=$action configured=${config.safeName()} " +
                         "successful=${result.successful}",
                 )
-                if (turnScreenOffAfterWake) {
-                    trace(
-                        "screen-off-after-wake scheduled; delayMs=" +
-                            SCREEN_OFF_AFTER_WAKE_DELAY_MS,
-                    )
-                    delay(SCREEN_OFF_AFTER_WAKE_DELAY_MS)
-                    withContext(Dispatchers.Main.immediate) {
-                        val screenOffAccepted =
-                            performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
-                        trace("screen-off-after-wake requested; accepted=$screenOffAccepted")
-                    }
-                }
                 val prefix = if (result.successful) "Done" else "Error"
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
             } catch (error: Throwable) {
@@ -415,7 +392,6 @@ class KeyAccessibilityService : AccessibilityService() {
         const val LONG_PRESS_MS = 500L
         const val NAVIGATION_LONG_PRESS_MS = 700L
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
-        const val SCREEN_OFF_AFTER_WAKE_DELAY_MS = 750L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
         const val NANOS_PER_MILLISECOND = 1_000_000L
     }

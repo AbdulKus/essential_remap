@@ -135,7 +135,6 @@ data class AppSettings(
     val hapticStrength: HapticStrength = HapticStrength.MEDIUM,
     val actions: Map<PressAction, ConfiguredAction> = defaultActions(),
     val runWhileLocked: Map<PressAction, Boolean> = defaultRunWhileLocked(),
-    val turnScreenOffAfterWake: Map<PressAction, Boolean> = defaultTurnScreenOffAfterWake(),
     val results: Map<PressAction, String?> = PressAction.entries.associateWith { null },
     val learning: Boolean = false,
 ) {
@@ -148,9 +147,6 @@ data class AppSettings(
             )
 
         fun defaultRunWhileLocked(): Map<PressAction, Boolean> =
-            PressAction.entries.associateWith { false }
-
-        fun defaultTurnScreenOffAfterWake(): Map<PressAction, Boolean> =
             PressAction.entries.associateWith { false }
     }
 }
@@ -165,14 +161,6 @@ object LockScreenExecutionPolicy {
         startedWhileLocked: Boolean,
         runWhileLocked: Map<PressAction, Boolean>,
     ): Boolean = !startedWhileLocked || runWhileLocked[action] == true
-}
-
-object ScreenOffAfterWakePolicy {
-    fun shouldTurnOff(
-        action: PressAction,
-        startedScreenOff: Boolean,
-        turnScreenOffAfterWake: Map<PressAction, Boolean>,
-    ): Boolean = startedScreenOff && turnScreenOffAfterWake[action] == true
 }
 
 object ActionUrlResolver {
