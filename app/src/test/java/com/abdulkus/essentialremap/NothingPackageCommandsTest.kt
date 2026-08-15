@@ -1,7 +1,7 @@
 package com.abdulkus.essentialremap
 
-import com.abdulkus.essentialremap.setup.NothingPackageCommands
 import com.abdulkus.essentialremap.setup.EssentialKeySetupCommands
+import com.abdulkus.essentialremap.setup.NothingPackageCommands
 import com.abdulkus.essentialremap.setup.PackageOperation
 import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
 import org.junit.Assert.assertEquals
@@ -31,7 +31,18 @@ class NothingPackageCommandsTest {
     }
 
     @Test
-    fun releaseSetupKeepsStockBlockSettingAndStartsShellMonitor() {
+    fun baseReleaseOnlyDetachesEssentialKey() {
+        assertEquals(
+            listOf(
+                "pm disable-user --user 0 com.nothing.ntessentialspace",
+                "pm disable-user --user 0 com.nothing.ntessentialrecorder",
+            ),
+            EssentialKeySetupCommands.commands(PackageOperation.DISABLE),
+        )
+    }
+
+    @Test
+    fun sleepMonitorSetupKeepsStockBlockSettingAndStartsShellMonitor() {
         assertEquals(
             listOf(
                 "pm disable-user --user 0 com.nothing.ntessentialspace",
@@ -39,7 +50,7 @@ class NothingPackageCommandsTest {
                 "settings put secure nt_block_essential_key 1 && echo essential-remap:ok",
                 ShellKeyMonitorCommands.INSTALL,
             ),
-            EssentialKeySetupCommands.commands(PackageOperation.DISABLE),
+            EssentialKeySetupCommands.commands(PackageOperation.INSTALL_SLEEP_MONITOR),
         )
     }
 
