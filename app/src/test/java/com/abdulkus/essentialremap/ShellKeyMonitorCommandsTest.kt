@@ -11,7 +11,7 @@ class ShellKeyMonitorCommandsTest {
         val script = ShellKeyMonitorCommands.scriptForTesting()
 
         assertTrue(script.contains("/system/bin/getevent -t"))
-        assertTrue(script.contains("\"gpio-keys\""))
+        assertTrue(script.contains("grep -F 'gpio-keys'"))
         assertTrue(script.contains("0001:00fa"))
         assertTrue(script.contains("00000001"))
         assertTrue(script.contains("00000000"))
@@ -28,22 +28,26 @@ class ShellKeyMonitorCommandsTest {
 
         assertTrue(script.contains("for proc_dir in /proc/[0-9]*"))
         assertTrue(script.contains("is_monitor_pid"))
+        assertTrue(script.contains("grep -aF"))
         assertTrue(script.contains("stop_all_monitors"))
         assertTrue(script.contains("kill_tree"))
         assertTrue(script.contains("/children"))
         assertTrue(script.contains("/system/bin/kill -9"))
-        assertTrue(script.contains("monitor_count"))
-        assertTrue(script.contains("count=1"))
+        assertTrue(script.contains("cleanup complete"))
+        assertFalse(script.contains("monitor_count"))
     }
 
     @Test
-    fun monitorUsesProtectedExplicitReceiverAndPersistentState() {
+    fun monitorUsesRootPidAndPersistentStateInsteadOfCountingPipelineHelpers() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
 
-        assertTrue(script.contains("com.abdulkus.essentialremap/.ShellKeyEventReceiver"))
+        assertTrue(script.contains("monitor_is_running"))
         assertTrue(script.contains("key-monitor.pid"))
         assertTrue(script.contains("key-monitor.state"))
         assertTrue(script.contains("revision=${'$'}MONITOR_REVISION pid=${'$'}${'$'} input=${'$'}INPUT_DEVICE"))
+        assertTrue(script.contains("monitor_is_running && [ -s \"${'$'}STATE_FILE\" ]"))
+        assertTrue(script.contains("count=1"))
+        assertFalse(script.contains("[ \"${'$'}(monitor_count)\" -eq 1 ]"))
     }
 
     @Test
@@ -81,7 +85,7 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
-    fun installerStagesPayloadAsRawBytesBeforeExecutingIt() {
+    fun installerStagesPayloadAndKeepsAStageLog() {
         val installer = ShellKeyMonitorCommands.installSessionScript
         val service = ShellKeyMonitorCommands.INSTALL_SERVICE
         val revision = ShellKeyMonitorCommands.REVISION
@@ -93,8 +97,11 @@ class ShellKeyMonitorCommandsTest {
         assertTrue(installer.contains("/system/bin/sh -n"))
         assertTrue(installer.contains("MONITOR_REVISION=$revision"))
         assertTrue(installer.contains("/system/bin/mv -f"))
-        assertTrue(installer.endsWith("exit\n"))
-        assertTrue(ShellKeyMonitorCommands.INSTALL.length < 100)
+        assertTrue(installer.contains("install-monitor.log"))
+        assertTrue(installer.contains("stage=decode"))
+        assertTrue(installer.contains("stage=validate"))
+        assertTrue(installer.contains("stage=start"))
+        assertFalse(installer.contains("$revision' $"))
 
         assertTrue(service.startsWith("exec:"))
         assertFalse(service.startsWith("shell:"))
@@ -102,11 +109,10 @@ class ShellKeyMonitorCommandsTest {
         assertTrue(service.contains("/system/bin/stty raw -echo"))
         assertTrue(service.contains("/system/bin/dd bs=1 count=$payloadBytes"))
         assertTrue(service.contains("of=/data/local/tmp/essential_remap/install-monitor.sh"))
+        assertTrue(service.contains("transport stage=dd"))
         assertTrue(service.contains("/system/bin/sh /data/local/tmp/essential_remap/install-monitor.sh"))
         assertTrue(service.contains("installer_status=${'$'}?"))
 
-        assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.startsWith(ShellKeyMonitorCommands.START_OK))
-        assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.startsWith(ShellKeyMonitorCommands.RUNNING))
         assertTrue(ShellKeyMonitorCommands.START_CONFIRMATION.endsWith("revision=$revision"))
         assertTrue(ShellKeyMonitorCommands.RUNNING_CONFIRMATION.endsWith("revision=$revision"))
 
