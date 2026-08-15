@@ -23,17 +23,18 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
-    fun monitorKillsEveryOlderRevisionBeforeStarting() {
+    fun monitorFindsOldRevisionsWithOnePsInsteadOfScanningEveryProcEntry() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
 
-        assertTrue(script.contains("for proc_dir in /proc/[0-9]*"))
-        assertTrue(script.contains("is_monitor_pid"))
-        assertTrue(script.contains("grep -aF"))
+        assertTrue(script.contains("/system/bin/ps -A -o PID,ARGS"))
+        assertTrue(script.contains("monitor_pids"))
         assertTrue(script.contains("stop_all_monitors"))
         assertTrue(script.contains("kill_tree"))
         assertTrue(script.contains("/children"))
         assertTrue(script.contains("/system/bin/kill -9"))
         assertTrue(script.contains("cleanup complete"))
+        assertFalse(script.contains("for proc_dir in /proc/[0-9]*"))
+        assertFalse(script.contains("grep -aF"))
         assertFalse(script.contains("monitor_count"))
     }
 
@@ -85,7 +86,7 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
-    fun installerStagesPayloadAndKeepsAStageLog() {
+    fun installerStagesPayloadAndLogsTheExactStartBoundary() {
         val installer = ShellKeyMonitorCommands.installSessionScript
         val service = ShellKeyMonitorCommands.INSTALL_SERVICE
         val revision = ShellKeyMonitorCommands.REVISION
@@ -100,8 +101,10 @@ class ShellKeyMonitorCommandsTest {
         assertTrue(installer.contains("install-monitor.log"))
         assertTrue(installer.contains("stage=decode"))
         assertTrue(installer.contains("stage=validate"))
-        assertTrue(installer.contains("stage=start"))
-        assertFalse(installer.contains("$revision' $"))
+        assertTrue(installer.contains("stage=start-invoke"))
+        assertTrue(installer.contains("key-monitor-start.out"))
+        assertTrue(installer.contains("/system/bin/sh /data/local/tmp/essential_remap/key-monitor.sh start > /data/local/tmp/essential_remap/key-monitor-start.out 2>&1"))
+        assertFalse(installer.contains("start_output=\"$("))
 
         assertTrue(service.startsWith("exec:"))
         assertFalse(service.startsWith("shell:"))
