@@ -16,6 +16,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.abdulkus.essentialremap.platform.AccessibilityStatusReader
 import com.abdulkus.essentialremap.setup.PackageOperation
 import com.abdulkus.essentialremap.ui.AppLanguage
@@ -23,6 +28,19 @@ import com.abdulkus.essentialremap.ui.EssentialRemapApp
 import com.abdulkus.essentialremap.ui.EssentialRemapTheme
 import com.abdulkus.essentialremap.ui.MapperViewModel
 import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.update.DownloadedUpdate
+import com.abdulkus.essentialremap.update.GitHubRelease
+import com.abdulkus.essentialremap.update.GitHubUpdateManager
+import com.abdulkus.essentialremap.update.InAppPromptHost
+import com.abdulkus.essentialremap.update.UpdatePolicy
+import com.abdulkus.essentialremap.update.UpdatePromptState
+import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val container get() = (application as EssentialKeyApplication).container
@@ -36,7 +54,12 @@ class MainActivity : ComponentActivity() {
     }
     private val accessibilityStatusReader by lazy { AccessibilityStatusReader(this) }
     private val userPreferences by lazy { UserPreferences(this) }
+    private val updateManager by lazy { GitHubUpdateManager(this) }
+    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val updatePromptState = MutableStateFlow<UpdatePromptState>(UpdatePromptState.None)
+    private val showSupportPrompt = MutableStateFlow(false)
     private var pendingPackageOperation: PackageOperation? = null
+    private var pendingInstallFile: File? = null
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -59,42 +82,76 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val unknownSourcesPermission = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val file = pendingInstallFile
+        if (file != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && packageManager.canRequestPackageInstalls()) {
+            launchPackageInstaller(file)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val initiallyOpenSettings = intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)
+        val normalConfiguredLaunch = savedInstanceState == null &&
+            !initiallyOpenSettings &&
+            userPreferences.onboardingComplete
+        if (normalConfiguredLaunch) {
+            val launchCount = userPreferences.recordConfiguredLaunch()
+            showSupportPrompt.value = UpdatePolicy.shouldShowSupportPrompt(launchCount)
+        }
+
         setContent {
+            val updateState = updatePromptState.collectAsStateWithLifecycle().value
+            val supportVisible = showSupportPrompt.collectAsStateWithLifecycle().value
             EssentialRemapTheme {
-                EssentialRemapApp(
-                    viewModel = viewModel,
-                    preferences = userPreferences,
-                    initiallyOpenSettings = initiallyOpenSettings,
-                    openAccessibilitySettings = {
-                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    },
-                    openNotificationPolicySettings = ::openNotificationPolicySettings,
-                    openDeveloperOptions = {
-                        startActivity(developerOptionsIntent())
-                    },
-                    openAssistantSettings = ::openAssistantSettings,
-                    openAppInfo = {
-                        startActivity(
-                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.parse("package:$packageName")
-                            },
-                        )
-                    },
-                    openDonate = {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/AbdulKus/donate")))
-                    },
-                    openSetupVideo = {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/")))
-                    },
-                    beginPackageSetup = ::beginPackageSetup,
-                    copyText = ::copyToClipboard,
-                )
+                Box(Modifier.fillMaxSize()) {
+                    EssentialRemapApp(
+                        viewModel = viewModel,
+                        preferences = userPreferences,
+                        initiallyOpenSettings = initiallyOpenSettings,
+                        openAccessibilitySettings = {
+                            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        },
+                        openNotificationPolicySettings = ::openNotificationPolicySettings,
+                        openDeveloperOptions = {
+                            startActivity(developerOptionsIntent())
+                        },
+                        openAssistantSettings = ::openAssistantSettings,
+                        openAppInfo = {
+                            startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.parse("package:$packageName")
+                                },
+                            )
+                        },
+                        openDonate = ::openDonate,
+                        openSetupVideo = {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/")))
+                        },
+                        beginPackageSetup = ::beginPackageSetup,
+                        copyText = ::copyToClipboard,
+                    )
+                    InAppPromptHost(
+                        language = userPreferences.language ?: AppLanguage.ENGLISH,
+                        updateState = updateState,
+                        showSupportPrompt = supportVisible,
+                        onDownloadUpdate = ::downloadUpdate,
+                        onInstallUpdate = ::installUpdate,
+                        onDismissUpdate = { updatePromptState.value = UpdatePromptState.Dismissed },
+                        onDonate = {
+                            showSupportPrompt.value = false
+                            openDonate()
+                        },
+                        onDismissSupport = { showSupportPrompt.value = false },
+                    )
+                }
             }
         }
+
+        if (normalConfiguredLaunch) startUpdateCheck()
     }
 
     override fun onResume() {
@@ -106,6 +163,72 @@ class MainActivity : ComponentActivity() {
         viewModel.updateDeveloperOptionsStatus(
             Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1,
         )
+    }
+
+    override fun onDestroy() {
+        activityScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun startUpdateCheck() {
+        updatePromptState.value = UpdatePromptState.Checking
+        activityScope.launch {
+            val release = runCatching { updateManager.checkForUpdate() }.getOrNull()
+            updatePromptState.value = release?.let(UpdatePromptState::Available) ?: UpdatePromptState.None
+        }
+    }
+
+    private fun downloadUpdate(release: GitHubRelease) {
+        updatePromptState.value = UpdatePromptState.Downloading(release, 0)
+        activityScope.launch {
+            runCatching {
+                updateManager.download(release) { progress ->
+                    updatePromptState.value = UpdatePromptState.Downloading(release, progress)
+                }
+            }.onSuccess { downloaded ->
+                updatePromptState.value = UpdatePromptState.Ready(downloaded)
+            }.onFailure { error ->
+                updatePromptState.value = UpdatePromptState.Error(
+                    release,
+                    error.message?.take(160) ?: "Unknown error",
+                )
+            }
+        }
+    }
+
+    private fun installUpdate(update: DownloadedUpdate) {
+        val file = update.file
+        if (!file.isFile) {
+            updatePromptState.value = UpdatePromptState.Error(update.release, "Downloaded APK is missing")
+            return
+        }
+        pendingInstallFile = file
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            unknownSourcesPermission.launch(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
+            return
+        }
+        launchPackageInstaller(file)
+    }
+
+    private fun launchPackageInstaller(file: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { startActivity(intent) }.onFailure {
+            val text = if (userPreferences.language == AppLanguage.RUSSIAN) {
+                "Не удалось открыть установщик Android"
+            } else {
+                "Could not open the Android package installer"
+            }
+            Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun beginPackageSetup(operation: PackageOperation) {
@@ -155,6 +278,10 @@ class MainActivity : ComponentActivity() {
             Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
                 .putExtra(Settings.EXTRA_APP_PACKAGE, packageName),
         )
+    }
+
+    private fun openDonate() {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/AbdulKus/donate")))
     }
 
     private fun copyToClipboard(text: String) {
