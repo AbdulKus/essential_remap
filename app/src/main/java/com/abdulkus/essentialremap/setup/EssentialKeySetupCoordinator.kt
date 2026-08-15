@@ -338,9 +338,9 @@ class EssentialKeySetupCoordinator(
         val settingOutput = readShellOutput(
             manager,
             EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
-        ) { it.lineSequence().any { line -> line.trim() == "0" } }
-        if (settingOutput.lineSequence().none { it.trim() == "0" }) {
-            error("Android did not enable reliable Essential Key wake dispatch")
+        ) { it.lineSequence().any { line -> line.trim() == "1" } }
+        if (settingOutput.lineSequence().none { it.trim() == "1" }) {
+            error("Android did not block the OEM Essential Key screen-off wake path")
         }
         val monitorOutput = readShellOutput(
             manager,
@@ -349,7 +349,7 @@ class EssentialKeySetupCoordinator(
         if (!monitorOutput.contains(ShellKeyMonitorCommands.RUNNING_CONFIRMATION)) {
             error("Android did not keep the shell key monitor running")
         }
-        diagnostics.log("Screen-off access verified: shell monitor running, nt_block_essential_key=0")
+        diagnostics.log("Screen-off access verified: shell monitor running, nt_block_essential_key=1")
         return true
     }
 
