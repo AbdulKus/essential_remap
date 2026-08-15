@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -140,9 +142,10 @@ fun InAppPromptHost(
                 PromptSurface {
                     Text(language.t("Download failed", "Не удалось скачать обновление"), fontWeight = FontWeight.Bold)
                     Text(
-                        updateState.message,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        language.t(
+                            "Check your connection and try again. The APK is also verified before installation.",
+                            "Проверьте интернет и попробуйте снова. Перед установкой APK также проверяется.",
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -158,7 +161,7 @@ fun InAppPromptHost(
 }
 
 @Composable
-private fun PromptSurface(content: @Composable Column.() -> Unit) {
+private fun PromptSurface(content: @Composable ColumnScope.() -> Unit) {
     Surface(
         modifier = Modifier
             .statusBarsPadding()
@@ -190,7 +193,7 @@ private fun PromptButtons(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TextButton(onClick = onSecondary) { Text(secondaryText) }
-        Spacer(Modifier.padding(horizontal = 3.dp))
+        Spacer(Modifier.width(6.dp))
         Button(onClick = onPrimary) { Text(primaryText) }
     }
 }
