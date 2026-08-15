@@ -1,0 +1,36 @@
+name: Polish Essential Remap setup v0.1.21
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/polish-setup-v021.yml
+      - .github/scripts/polish_setup_v021.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply setup and UI polish
+        run: python3 .github/scripts/polish_setup_v021.py
+      - name: Guard monitor revision
+        run: grep -F 'const val REVISION = 8' app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt
+      - name: Commit app changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app
+          if git diff --cached --quiet; then
+            echo 'No app changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Polish setup flow and sleep monitor lifecycle'
+          git push origin HEAD:main
