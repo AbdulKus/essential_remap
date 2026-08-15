@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_VERSION: 0.1.19
+  APP_VERSION: 0.1.20
 
 jobs:
   build:
@@ -127,5 +127,5 @@ jobs:
           make_latest: true
           fail_on_unmatched_files: true
           files: |
-            essential-remap-${{ env.APP_VERSION }}.apk
-            essential-remap-${{ env.APP_VERSION }}.apk.sha256
+            essential-remap-${APP_VERSION}.apk
+            essential-remap-${APP_VERSION}.apk.sha256
