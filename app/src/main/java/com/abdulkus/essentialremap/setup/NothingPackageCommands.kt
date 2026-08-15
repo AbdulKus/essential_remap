@@ -23,8 +23,6 @@ object EssentialKeySetupCommands {
     const val COMMAND_OK = "essential-remap:ok"
     const val ENABLE_RELIABLE_SCREEN_OFF_DISPATCH =
         "settings put secure nt_block_essential_key 1 && echo $COMMAND_OK"
-    const val RESTORE_OEM_SCREEN_OFF_DISPATCH =
-        "settings put secure nt_block_essential_key 0 && echo 'new state: nt_block_essential_key=0'"
     const val READ_SCREEN_OFF_WAKE_SETTING = "settings get secure nt_block_essential_key"
 
     fun commands(operation: PackageOperation): List<String> = buildList {
@@ -36,7 +34,6 @@ object EssentialKeySetupCommands {
             }
             PackageOperation.RESTORE -> {
                 add(ShellKeyMonitorCommands.stop)
-                add(RESTORE_OEM_SCREEN_OFF_DISPATCH)
                 addAll(NothingPackageCommands.commands(operation))
             }
         }
