@@ -198,5 +198,7 @@ private fun PromptButtons(
     }
 }
 
+private fun AppLanguage.t(en: String, ru: String): String = if (this == AppLanguage.RUSSIAN) ru else en
+
 private fun formatMegabytes(bytes: Long): String =
     String.format("%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
