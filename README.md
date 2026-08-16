@@ -1,104 +1,111 @@
 # Essential Remap
 
+[English](#english) · [Русский](#русский) · [❤️ Donate](https://abdulkus.github.io/donate) · [Releases](../../releases)
+
 [![Android build and release](https://github.com/AbdulKus/essential_remap/actions/workflows/android.yml/badge.svg)](https://github.com/AbdulKus/essential_remap/actions/workflows/android.yml)
 
-Essential Remap turns the Nothing/CMF **Essential Key** into a configurable global button. It handles the key's Linux scan code `250` and supports separate actions for a single press, double press, and hold.
+---
 
-The app is designed for Nothing OS and includes Russian and English interfaces.
+## English
 
-## Features
+**Essential Remap** is a free utility for remapping the physical **Essential Key** on Nothing OS. It was developed and tested primarily on the Nothing Phone (4a) Pro.
 
-- Launch any app with a launcher activity.
-- Voice assistant and native Circle to Search invocation with a gesture fallback.
-- Flashlight, camera, screenshot, lock, power menu, notifications, Quick Settings.
-- Home, Back, Recents, and media controls.
-- Normal, vibrate, silent, and silent/normal toggle.
-- Open URLs/deep links and send GET/POST webhooks.
-- Four haptic strengths.
-- Master remapping switch; gestures assigned to **No action** do not vibrate.
-- Per-gesture lock-screen and screen-off execution.
-- Built-in, reversible Wireless ADB setup; no PC or root is required.
+Assign a different action to a **single press**, **double press**, and **long press** — including while the phone is locked or the screen is off.
 
-## How it works
+### Features
 
-Nothing OS normally consumes the button through these packages:
+- Launch apps, camera, flashlight, screenshots and URLs.
+- Home, Back, Recents, notifications and Quick Settings.
+- Media controls, assistant and Circle to Search.
+- Sound mode: normal, vibrate, silent or toggle.
+- Configurable haptic feedback.
+- Separate lock-screen and screen-off behavior for every press type.
+- Built-in update checker for GitHub Releases with APK signature verification.
+- 10 interface languages: EN, RU, DE, FR, PL, UA, HI, CH, JP, KO.
+- No root required.
 
-```text
-com.nothing.ntessentialspace
-com.nothing.ntessentialrecorder
-```
+### How it works
 
-The onboarding can pair with Android's local Wireless ADB service and run only these allowlisted commands:
+For normal screen-on use, Essential Remap uses an Android **Accessibility Service** only to intercept the Essential Key. It does not read screen content, messages, passwords or typed text.
 
-```sh
-pm disable-user --user 0 com.nothing.ntessentialspace
-pm disable-user --user 0 com.nothing.ntessentialrecorder
-settings put secure nt_block_essential_key 1
-# The built-in setup also installs and starts the narrowly filtered shell monitor.
-```
+Nothing OS normally reserves the key for Essential Space. For optional **screen-off support**, the app uses Android's local **Wireless Debugging** once during setup to:
 
-No package data is deleted. The Settings screen can restore both packages with `pm enable --user 0 ...`.
+- release the Essential Key from Nothing's Essential Space packages;
+- keep `nt_block_essential_key=1`;
+- start a small filtered shell monitor that listens only for the Essential Key input event.
 
-After the key is released, an `AccessibilityService` requests Android's key-event filter and consumes only events whose scan code is `250`. It does not retrieve window content, inspect the screen, type text, or collect accessibility data. Android documents this API as receiving key events before the rest of the system and allowing a handled event to be consumed. Gesture capability is used only as a fallback to reproduce a long press on the bottom navigation handle when Circle to Search is explicitly assigned and triggered.
+The setup is reversible from the app. No package data is deleted.
 
-## Lock screen and sleep
+After a full phone reboot the shell monitor stops, so screen-off handling needs to be restarted from Essential Remap. The saved ADB identity is reused when possible, so pairing normally does not need to be repeated.
 
-Each press type has a **Run while locked** option. **Turn screen off again** can also be enabled per press type. It calls Android's lock-screen global action shortly after the configured action, once Nothing OS has finished waking, and only when that same press began with the display non-interactive; presses made while the display was already on are unaffected. The listener is not restricted to the app's own window, so it can receive the Essential Key while Nothing OS is showing SystemUI.
+### Install
 
-On the tested Nothing OS build, `nt_block_essential_key=0` lets Nothing OS wake the device long enough to dispatch a complete press reliably. WindowManager records `ACTION_DOWN` while the display is still non-interactive and can record the matching `ACTION_UP` after the display becomes interactive. Essential Remap pairs both halves by `downTime`, so the first physical press is classified instead of merely waking the display.
+1. Download the latest signed APK from [Releases](../../releases).
+2. Choose a language.
+3. Follow the in-app setup and enable **Essential Remap** in Android Accessibility settings.
+4. Assign actions to the Essential Key.
 
-The built-in Wireless ADB setup starts a small monitor under Android's non-root `shell` UID. Its Base64 payload is streamed in short lines through ADB's raw `exec` service instead of an interactive terminal or the much smaller service destination. The decoded script is syntax-checked, revision-checked, and atomically moved into place so a dropped transfer cannot leave an old or partial monitor behind. The monitor discovers the `gpio-keys` input device and blocks directly in Android's `getevent`, accepting only Linux key type `0001`, code `00fa` (scan code 250), and its DOWN/UP values. On DOWN it reads a short, already-buffered WindowManager log snapshot only to recover whether the display was interactive before Nothing OS woke it. It then sends an explicit permission-protected event to Essential Remap. This avoids the unreliable permanent logcat stream and preserves the UP event required for a single press. The waiting process uses no wake lock, performs no polling, and consumes CPU only when the Essential Key changes state. The accessibility side deduplicates the same physical event if Android also delivers it normally.
+If you enable screen-off support, the app will guide you through Wireless Debugging setup.
 
-The broadcast receiver requires Android's signature/development `android.permission.DUMP`, which the shell monitor holds but ordinary apps do not. Nothing OS on Android 16 reports the sender UID as unavailable (`-1`) for these `am broadcast` deliveries; the receiver therefore relies on that manifest permission when identity is unavailable and still rejects any concrete non-shell UID.
+> Before uninstalling Essential Remap, use **Restore Essential Space** in the app.
 
-When Android recreates the app process for a sleeping-device press, the shell events are queued until DataStore has supplied the saved action and **Run while locked** settings. This prevents the first press from being evaluated against defaults during accessibility-service cold start.
+### Privacy
 
-The shell process naturally stops when the phone reboots. Essential Remap detects the changed Android boot count, marks sleep handling as needing setup, and can start the monitor again through the same Wireless ADB flow. No root or always-on CPU wake lock is used.
+Essential Remap contains **no analytics or telemetry**. Settings, ADB credentials and usage configuration remain on the device. Network access is used only for GitHub update checks and user-configured HTTP actions.
 
-The onboarding error card and Settings screen can copy or clear a persistent diagnostic log. It records app/device versions, setup phases, the input device and state reported by the shell monitor, receiver and accessibility processing stages, gesture-policy decisions, action type and success state. Pairing codes, ADB private keys, HTTP endpoints, app package names, and configured URLs are never written to the log.
+### License & attribution
 
-The screen-off bridge is firmware-specific: a future Nothing OS update could rename the input device or change the diagnostic WindowManager message, while screen-on Accessibility handling would continue to work.
+This repository is currently distributed under the **MIT License**. Parts of the low-level key handling and local ADB setup are based on the MIT-licensed [wreck2053/essential-key](https://github.com/wreck2053/essential-key). See [NOTICE](NOTICE).
 
-## Circle to Search
+---
 
-Android does not expose a public `CIRCLE_TO_SEARCH` action. Essential Remap requests a contextual session from Android's active voice-interaction service with Google's `omni.entry_point` and AOSP invocation type `8`. If Nothing OS blocks that non-SDK route, the accessibility service reproduces a 700 ms hold on the navigation handle/Home button instead. Unlike the old `ACTION_ASSIST` implementation, neither path deliberately opens the Google app home screen. Google must be the default digital assistant, **Use screenshot** must be enabled, and **Hold handle to search** must be enabled in navigation settings.
+## Русский
 
-## Install
+**Essential Remap** — бесплатная утилита для переназначения физической кнопки **Essential Key** в Nothing OS. В первую очередь приложение разрабатывается и тестируется на Nothing Phone (4a) Pro.
 
-Download the signed APK from [Releases](../../releases). Releases built from `main` require a private keystore from GitHub Actions Secrets; the workflow never silently falls back to the public test key for a published build.
+Для **одиночного нажатия**, **двойного нажатия** и **удержания** можно назначить разные действия — в том числе на экране блокировки и при выключенном дисплее.
 
-On first launch:
+### Возможности
 
-1. Choose Russian or English.
-2. Use the built-in Wireless ADB flow to release the Essential Key and grant screen-off access.
-3. Enable **Essential Remap key listener** in Android Accessibility settings.
-4. Choose actions and save.
+- Запуск приложений, камеры, фонарика, скриншота и ссылок.
+- Домой, Назад, Недавние, уведомления и быстрые настройки.
+- Управление медиа, ассистент и Circle to Search.
+- Режим звука: обычный, вибрация, без звука или переключение.
+- Настраиваемая сила виброотклика.
+- Отдельные настройки работы на блокировке и с выключенным экраном для каждого типа нажатия.
+- Проверка обновлений через GitHub Releases, загрузка APK и проверка подписи перед установкой.
+- 10 языков интерфейса: EN, RU, DE, FR, PL, UA, HI, CH, JP, KO.
+- Root не требуется.
 
-Before uninstalling, restore Essential Space in the app. Uninstalling the remapper alone does not re-enable Nothing's packages.
+### Как это работает
 
-## Build
+При включённом экране Essential Remap использует системную **службу специальных возможностей** только для перехвата Essential Key. Приложение не читает содержимое экрана, сообщения, пароли или вводимый текст.
 
-Requirements: JDK 17, Android SDK 36, and Android Studio or Gradle 8.11.1.
+Nothing OS по умолчанию резервирует кнопку для Essential Space. Для дополнительной **работы при выключенном экране** приложение один раз использует локальную **беспроводную отладку Android**, чтобы:
 
-```sh
-./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
-```
+- освободить Essential Key от пакетов Essential Space;
+- сохранить `nt_block_essential_key=1`;
+- запустить небольшой shell-монитор, который слушает только событие Essential Key.
 
-Every push to `main` builds debug and release APKs. The first successful build for the version in the workflow also publishes a GitHub Release with a SHA-256 checksum.
+Все изменения обратимы из самого приложения. Данные пакетов Nothing не удаляются.
 
-Release signing uses these GitHub Actions Secrets:
+После полной перезагрузки телефона shell-монитор останавливается, поэтому работу с выключенным экраном нужно снова запустить из Essential Remap. Сохранённый ADB-ключ используется повторно, поэтому заново выполнять сопряжение обычно не требуется.
 
-- `RELEASE_KEYSTORE_BASE64` — the entire JKS or PKCS12 file encoded as base64
-- `RELEASE_KEYSTORE_PASSWORD`
-- `RELEASE_KEY_ALIAS`
-- `RELEASE_KEY_PASSWORD`
+### Установка
 
-These are the same names used by `nothing_matrix_apps`. The workflow also accepts `SIGNING_*`, `KEYSTORE_*`/`KEY_*`, and `ANDROID_*` aliases. Pull requests without secret access use the repository test key only for CI validation.
+1. Скачайте последний подписанный APK из [Releases](../../releases).
+2. Выберите язык.
+3. Пройдите встроенную настройку и включите **Essential Remap** в специальных возможностях Android.
+4. Назначьте действия на Essential Key.
 
-## Privacy
+Если нужна работа при выключенном экране, приложение само проведёт через настройку Wireless Debugging.
 
-All settings stay on the device. Internet permission exists only for user-configured HTTP actions. Wireless ADB credentials are generated and stored locally by Android's app storage. The shell monitor reads only the filtered Essential Key WindowManager stream; log contents are not saved or transmitted. The protected receiver accepts monitor events only from Android's shell UID. No analytics or telemetry is included.
+> Перед удалением Essential Remap используйте в приложении **«Восстановить Essential Space»**.
 
-## License and attribution
+### Конфиденциальность
 
-MIT licensed. The low-level key classifier, action execution, and local Wireless ADB setup are adapted from the MIT-licensed [wreck2053/essential-key](https://github.com/wreck2053/essential-key). See [NOTICE](NOTICE).
+В Essential Remap **нет аналитики и телеметрии**. Настройки, ADB-ключи и конфигурация действий остаются на устройстве. Интернет используется только для проверки обновлений на GitHub и HTTP-действий, которые пользователь настроил сам.
+
+### Лицензия и авторство
+
+Сейчас репозиторий распространяется по лицензии **MIT**. Часть низкоуровневой обработки кнопки и локальной ADB-настройки основана на MIT-проекте [wreck2053/essential-key](https://github.com/wreck2053/essential-key). Подробности — в [NOTICE](NOTICE).
