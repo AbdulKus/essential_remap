@@ -230,24 +230,45 @@ class EssentialKeySetupCoordinator(
     private suspend fun connectUsingStoredIdentity(): LocalAdbConnectionManager? {
         if (!LocalAdbConnectionManager.hasStoredIdentity(appContext)) {
             diagnostics.log("No stored ADB identity; pairing is required")
-            openWirelessDebuggingSettings()
             return null
         }
 
-        runCatching {
-            return connectWithRetry(attempts = 1, discoveryTimeoutMs = SAVED_KEY_INITIAL_DISCOVERY_TIMEOUT_MS)
-        }.onFailure {
-            diagnostics.log("Saved-key fast connect unavailable: ${it.fullDescription()}")
+        val fastResult = runCatching {
+            connectWithRetry(
+                attempts = SAVED_KEY_FAST_ATTEMPTS,
+                discoveryTimeoutMs = SAVED_KEY_INITIAL_DISCOVERY_TIMEOUT_MS,
+            )
+        }
+        fastResult.getOrNull()?.let { return it }
+        fastResult.exceptionOrNull()?.let { error ->
+            diagnostics.log("Saved-key fast connect unavailable: ${error.fullDescription()}")
+            if (isAuthorizationFailure(error)) {
+                diagnostics.log("Stored ADB identity is no longer authorized; pairing is required")
+                return null
+            }
         }
 
+        val wirelessDebuggingEnabled = isWirelessDebuggingEnabled()
         _state.value = _state.value.copy(
-            phase = SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING,
-            message = text(
-                "Turn on Wireless debugging. Essential Remap will reconnect automatically.",
-                "Включите Wireless debugging. Essential Remap подключится автоматически.",
-            ),
+            phase = if (wirelessDebuggingEnabled) SetupPhase.CONNECTING else SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING,
+            message = if (wirelessDebuggingEnabled) {
+                text(
+                    "Wireless debugging is already enabled. Reconnecting with the saved key…",
+                    "Wireless debugging уже включён. Переподключаемся по сохранённому ключу…",
+                )
+            } else {
+                text(
+                    "Turn on Wireless debugging. Essential Remap will reconnect automatically.",
+                    "Включите Wireless debugging. Essential Remap подключится автоматически.",
+                )
+            },
         )
-        openWirelessDebuggingSettings()
+        if (!wirelessDebuggingEnabled) {
+            diagnostics.log("Wireless debugging global setting is off; opening Android settings")
+            openWirelessDebuggingSettings()
+        } else {
+            diagnostics.log("Wireless debugging global setting is already on; staying in Essential Remap")
+        }
         postProgressNotification()
 
         repeat(SAVED_KEY_WAIT_ATTEMPTS) { attempt ->
@@ -267,9 +288,19 @@ class EssentialKeySetupCoordinator(
         }
         diagnostics.log("Wireless debugging did not become connectable with stored key")
         throw IOException(
-            "Wireless debugging is not available with the saved key. Turn it on and try again.",
+            if (isWirelessDebuggingEnabled()) {
+                "Wireless debugging is enabled, but its ADB endpoint was not found. Try again."
+            } else {
+                "Wireless debugging is not available with the saved key. Turn it on and try again."
+            },
         )
     }
+
+    private fun isWirelessDebuggingEnabled(): Boolean = runCatching {
+        Settings.Global.getInt(appContext.contentResolver, WIRELESS_DEBUGGING_GLOBAL_SETTING, 0) == 1
+    }.onFailure {
+        diagnostics.log("Could not read Wireless debugging global setting: ${it.fullDescription()}")
+    }.getOrDefault(false)
 
     private suspend fun applyConnectedOperation(
         connectedManager: LocalAdbConnectionManager,
@@ -736,6 +767,7 @@ class EssentialKeySetupCoordinator(
         private const val CONNECTION_DISCOVERY_TIMEOUT_MS = 5_000L
         private const val CONNECTION_RETRY_DELAY_MS = 1_000L
         private const val CONNECTION_AFTER_PAIR_DELAY_MS = 1_500L
+        private const val SAVED_KEY_FAST_ATTEMPTS = 2
         private const val SAVED_KEY_INITIAL_DISCOVERY_TIMEOUT_MS = 2_500L
         private const val SAVED_KEY_RETRY_DISCOVERY_TIMEOUT_MS = 1_500L
         private const val SAVED_KEY_WAIT_ATTEMPTS = 12
@@ -746,6 +778,7 @@ class EssentialKeySetupCoordinator(
         private const val SHELL_WRITE_CHUNK_BYTES = 1_024
         private const val MAX_LOG_OUTPUT_CHARS = 2_000
         private const val ACTION_WIRELESS_DEBUGGING_SETTINGS = "android.settings.WIRELESS_DEBUGGING_SETTINGS"
+        private const val WIRELESS_DEBUGGING_GLOBAL_SETTING = "adb_wifi_enabled"
         private const val SETTINGS_FRAGMENT_ARGUMENT_KEY = ":settings:fragment_args_key"
         private const val WIRELESS_DEBUGGING_PREFERENCE_KEY = "toggle_adb_wireless"
     }

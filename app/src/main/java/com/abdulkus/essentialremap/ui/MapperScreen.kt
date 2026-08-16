@@ -661,7 +661,10 @@ private fun SetupProgress(
     copyDiagnostics: () -> Unit,
     clearDiagnostics: () -> Unit,
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
         Column(Modifier.padding(16.dp)) {
             if (state.setup.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
             Text(
@@ -812,7 +815,9 @@ private fun HomeScreen(
     var httpGesture by remember { mutableStateOf<PressAction?>(null) }
     var soundGesture by remember { mutableStateOf<PressAction?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(initiallyOpenSettings) }
-    val setupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
+    val baseSetupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
+    val screenOffReady = !screenOffEnabled || state.setup.screenOffAccessGranted
+    val setupReady = baseSetupReady && screenOffReady
     val ready = setupReady && state.settings.remappingEnabled
 
     Scaffold(
@@ -907,6 +912,20 @@ private fun HomeScreen(
                         action = openAccessibilitySettings,
                     )
                 }
+                screenOffEnabled && !state.setup.screenOffAccessGranted -> item {
+                    WarningCard(
+                        text = language.t(
+                            "Sleep monitor is not running",
+                            "Монитор сна не запущен",
+                        ),
+                        detail = language.t(
+                            "Restart the sleep monitor to handle Essential Key while the display is off.",
+                            "Перезапустите монитор сна для работы Essential Key при выключенном экране.",
+                        ),
+                        actionLabel = language.t("FIX", "ИСПРАВИТЬ"),
+                        action = { beginPackageSetup(PackageOperation.INSTALL_SLEEP_MONITOR) },
+                    )
+                }
             }
             items(PressAction.entries) { gesture ->
                 GestureCard(
@@ -934,6 +953,11 @@ private fun HomeScreen(
             chooseUrl = { actionGesture = null; urlGesture = gesture },
             chooseHttp = { actionGesture = null; httpGesture = gesture },
             chooseSound = { actionGesture = null; soundGesture = gesture },
+            soundModeAllowed = state.notificationPolicyAccess,
+            requestSoundModeAccess = {
+                actionGesture = null
+                openNotificationPolicySettings()
+            },
             chooseKind = { kind -> updateActionKind(gesture, kind); actionGesture = null },
             chooseSystem = { action -> updateSystemAction(gesture, action); actionGesture = null },
         )
@@ -1100,6 +1124,8 @@ private fun ActionChooserDialog(
     chooseUrl: () -> Unit,
     chooseHttp: () -> Unit,
     chooseSound: () -> Unit,
+    soundModeAllowed: Boolean,
+    requestSoundModeAccess: () -> Unit,
     chooseKind: (ActionKind) -> Unit,
     chooseSystem: (SystemAction) -> Unit,
 ) {
@@ -1114,7 +1140,14 @@ private fun ActionChooserDialog(
         ActionOption(language.t("Quick Settings", "Быстрые настройки")) { chooseSystem(SystemAction.QUICK_SETTINGS) },
         ActionOption(language.t("Lock screen", "Заблокировать экран")) { chooseSystem(SystemAction.LOCK_SCREEN) },
         ActionOption(language.t("Power menu", "Меню питания")) { chooseSystem(SystemAction.POWER_MENU) },
-        ActionOption(language.t("Sound mode", "Режим звука"), run = chooseSound),
+        ActionOption(
+            language.t("Sound mode", "Режим звука"),
+            subtitle = if (soundModeAllowed) null else language.t(
+                "Grant Do Not Disturb access first",
+                "Сначала разрешите доступ к режиму «Не беспокоить»",
+            ),
+            run = if (soundModeAllowed) chooseSound else requestSoundModeAccess,
+        ),
         ActionOption(language.t("Play / pause media", "Пауза / воспроизведение")) { chooseSystem(SystemAction.MEDIA_PLAY_PAUSE) },
         ActionOption(language.t("Next track", "Следующий трек")) { chooseSystem(SystemAction.MEDIA_NEXT) },
         ActionOption(language.t("Previous track", "Предыдущий трек")) { chooseSystem(SystemAction.MEDIA_PREVIOUS) },
