@@ -33,7 +33,7 @@ The onboarding can pair with Android's local Wireless ADB service and run only t
 ```sh
 pm disable-user --user 0 com.nothing.ntessentialspace
 pm disable-user --user 0 com.nothing.ntessentialrecorder
-settings put secure nt_block_essential_key 0
+settings put secure nt_block_essential_key 1
 # The built-in setup also installs and starts the narrowly filtered shell monitor.
 ```
 

@@ -16,6 +16,7 @@ import com.abdulkus.essentialremap.R
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import com.abdulkus.essentialremap.ui.AppLanguage
 import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.ui.translate
 
 class SleepMonitorBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -42,12 +43,12 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
             ) {
                 return
             }
-            val russian = language == AppLanguage.RUSSIAN
+            val selectedLanguage = language ?: AppLanguage.ENGLISH
             val manager = context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    if (russian) "Монитор сна Essential Remap" else "Essential Remap sleep monitor",
+                    selectedLanguage.translate("Essential Remap sleep monitor", "Монитор сна Essential Remap"),
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ),
             )
@@ -64,22 +65,20 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(
-                        if (russian) "Перезапустите монитор сна" else "Restart the sleep monitor",
+                        selectedLanguage.translate("Restart the sleep monitor", "Перезапустите монитор сна"),
                     )
                     .setContentText(
-                        if (russian) {
-                            "Для работы Essential Key с выключенным экраном требуется повторная активация после перезагрузки."
-                        } else {
-                            "Screen-off Essential Key handling must be reactivated after a phone reboot."
-                        },
+                        selectedLanguage.translate(
+                            "Screen-off Essential Key handling must be reactivated after a phone reboot.",
+                            "Для работы Essential Key с выключенным экраном требуется повторная активация после перезагрузки.",
+                        ),
                     )
                     .setStyle(
                         NotificationCompat.BigTextStyle().bigText(
-                            if (russian) {
-                                "Откройте Essential Remap, включите Wireless debugging и нажмите «Перезапуск» у монитора сна."
-                            } else {
-                                "Open Essential Remap, enable Wireless debugging, then tap Restart for the sleep monitor."
-                            },
+                            selectedLanguage.translate(
+                                "Open Essential Remap, enable Wireless debugging, then tap Restart for the sleep monitor.",
+                                "Откройте Essential Remap, включите Wireless debugging и нажмите «Перезапуск» у монитора сна.",
+                            ),
                         ),
                     )
                     .setContentIntent(contentIntent)

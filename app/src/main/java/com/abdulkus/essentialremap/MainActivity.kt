@@ -28,6 +28,7 @@ import com.abdulkus.essentialremap.ui.EssentialRemapApp
 import com.abdulkus.essentialremap.ui.EssentialRemapTheme
 import com.abdulkus.essentialremap.ui.MapperViewModel
 import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.ui.translate
 import com.abdulkus.essentialremap.update.DownloadedUpdate
 import com.abdulkus.essentialremap.update.GitHubRelease
 import com.abdulkus.essentialremap.update.GitHubUpdateManager
@@ -40,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -67,14 +69,13 @@ class MainActivity : ComponentActivity() {
         val operation = pendingPackageOperation.also { pendingPackageOperation = null }
         if (operation != null) {
             if (!granted) {
-                val russian = userPreferences.language == AppLanguage.RUSSIAN
+                val language = userPreferences.language ?: AppLanguage.ENGLISH
                 Toast.makeText(
                     this,
-                    if (russian) {
-                        "Без уведомлений код сопряжения придётся вводить после возврата в приложение"
-                    } else {
-                        "Without notifications, enter a pairing code after returning to the app"
-                    },
+                    language.translate(
+                        "Without notifications, enter a pairing code after returning to the app",
+                        "Без уведомлений код сопряжения придётся вводить после возврата в приложение",
+                    ),
                     Toast.LENGTH_LONG,
                 ).show()
             }
@@ -128,6 +129,7 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         openDonate = ::openDonate,
+                        checkForUpdates = { startUpdateCheck(showResult = true) },
                         openSetupVideo = {
                             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/")))
                         },
@@ -156,6 +158,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        refreshRuntimeState()
+        // Accessibility settings can report the old enabled-service list for a short moment
+        // after returning to the app. Re-read it twice so the home status clears immediately.
+        activityScope.launch {
+            delay(350)
+            refreshRuntimeState()
+            delay(850)
+            refreshRuntimeState()
+        }
+    }
+
+    private fun refreshRuntimeState() {
         viewModel.refreshSetup()
         viewModel.updateAccessibilityStatus(accessibilityStatusReader.read())
         val notificationManager = getSystemService(NotificationManager::class.java)
@@ -170,11 +184,33 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun startUpdateCheck() {
+    private fun startUpdateCheck(showResult: Boolean = false) {
         updatePromptState.value = UpdatePromptState.Checking
         activityScope.launch {
-            val release = runCatching { updateManager.checkForUpdate() }.getOrNull()
-            updatePromptState.value = release?.let { UpdatePromptState.Available(it) } ?: UpdatePromptState.None
+            runCatching { updateManager.checkForUpdate() }
+                .onSuccess { release ->
+                    updatePromptState.value = release?.let { UpdatePromptState.Available(it) }
+                        ?: UpdatePromptState.None
+                    if (showResult && release == null) {
+                        val language = userPreferences.language ?: AppLanguage.ENGLISH
+                        Toast.makeText(
+                            this@MainActivity,
+                            language.translate("Latest version installed", "Установлена последняя версия"),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+                .onFailure {
+                    updatePromptState.value = UpdatePromptState.None
+                    if (showResult) {
+                        val language = userPreferences.language ?: AppLanguage.ENGLISH
+                        Toast.makeText(
+                            this@MainActivity,
+                            language.translate("Could not check for updates", "Не удалось проверить обновления"),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
         }
     }
 
@@ -222,11 +258,11 @@ class MainActivity : ComponentActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runCatching { startActivity(intent) }.onFailure {
-            val text = if (userPreferences.language == AppLanguage.RUSSIAN) {
-                "Не удалось открыть установщик Android"
-            } else {
-                "Could not open the Android package installer"
-            }
+            val language = userPreferences.language ?: AppLanguage.ENGLISH
+            val text = language.translate(
+                "Could not open the Android package installer",
+                "Не удалось открыть установщик Android",
+            )
             Toast.makeText(this, text, Toast.LENGTH_LONG).show()
         }
     }
@@ -288,7 +324,8 @@ class MainActivity : ComponentActivity() {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(
             ClipData.newPlainText("Essential Remap", text),
         )
-        val message = if (userPreferences.language == AppLanguage.RUSSIAN) "Скопировано" else "Copied"
+        val language = userPreferences.language ?: AppLanguage.ENGLISH
+        val message = language.translate("Copied", "Скопировано")
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 

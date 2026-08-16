@@ -17,6 +17,8 @@ import androidx.core.app.RemoteInput
 import com.abdulkus.essentialremap.MainActivity
 import com.abdulkus.essentialremap.R
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
+import com.abdulkus.essentialremap.ui.AppLanguage
+import com.abdulkus.essentialremap.ui.translate
 import io.github.muntashirakon.adb.AdbStream
 import io.github.muntashirakon.adb.android.AdbMdns
 import java.io.IOException
@@ -713,9 +715,10 @@ class EssentialKeySetupCoordinator(
     }
 
     private fun text(english: String, russian: String): String {
-        val language = appContext.getSharedPreferences("essential_remap_ui", Context.MODE_PRIVATE)
+        val code = appContext.getSharedPreferences("essential_remap_ui", Context.MODE_PRIVATE)
             .getString("language", "en")
-        return if (language == "ru") russian else english
+        val language = AppLanguage.fromCode(code) ?: AppLanguage.ENGLISH
+        return language.translate(english, russian)
     }
 
     private data class AdbEndpoint(

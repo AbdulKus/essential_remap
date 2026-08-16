@@ -103,6 +103,7 @@ fun EssentialRemapApp(
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
+    checkForUpdates: () -> Unit,
     openSetupVideo: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     copyText: (String) -> Unit,
@@ -168,6 +169,7 @@ fun EssentialRemapApp(
         openAssistantSettings = openAssistantSettings,
         openAppInfo = openAppInfo,
         openDonate = openDonate,
+        checkForUpdates = checkForUpdates,
         beginPackageSetup = beginPackageSetup,
         submitPairingCode = viewModel::submitPairingCode,
         cancelPackageSetup = viewModel::cancelPackageSetup,
@@ -207,11 +209,14 @@ private fun LanguageScreen(select: (AppLanguage) -> Unit) {
                 .padding(24.dp),
         ) {
             Column(
-                modifier = Modifier.align(Alignment.Center).widthIn(max = 520.dp),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .widthIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 EssentialMark()
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(24.dp))
                 Text(
                     "CHOOSE LANGUAGE",
                     fontFamily = FontFamily.Monospace,
@@ -219,41 +224,63 @@ private fun LanguageScreen(select: (AppLanguage) -> Unit) {
                     letterSpacing = 2.sp,
                 )
                 Text(
-                    "ВЫБЕРИТЕ ЯЗЫК",
+                    "Choose your language · Выберите язык",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF62625E),
-                    modifier = Modifier.padding(top = 6.dp, bottom = 28.dp),
+                    modifier = Modifier.padding(top = 6.dp, bottom = 20.dp),
                 )
-                LanguageButton("Русский", "RU") { select(AppLanguage.RUSSIAN) }
-                Spacer(Modifier.height(12.dp))
-                LanguageButton("English", "EN") { select(AppLanguage.ENGLISH) }
+                AppLanguage.entries.chunked(2).forEach { rowLanguages ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        rowLanguages.forEach { item ->
+                            LanguageButton(
+                                language = item,
+                                modifier = Modifier.weight(1f),
+                            ) { select(item) }
+                        }
+                        if (rowLanguages.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun LanguageButton(label: String, code: String, onClick: () -> Unit) {
+private fun LanguageButton(
+    language: AppLanguage,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         color = Color.White,
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(18.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(color = Color.Black, shape = CircleShape) {
                 Text(
-                    code,
+                    language.shortLabel,
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(10.dp),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
                 )
             }
-            Text(label, modifier = Modifier.padding(start = 16.dp).weight(1f), fontWeight = FontWeight.SemiBold)
-            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+            Text(
+                language.nativeName,
+                modifier = Modifier.padding(start = 10.dp).weight(1f),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                fontSize = 13.sp,
+            )
         }
     }
 }
@@ -757,6 +784,7 @@ private fun HomeScreen(
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
+    checkForUpdates: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
@@ -836,12 +864,48 @@ private fun HomeScreen(
                 Spacer(Modifier.height(28.dp))
                 Text(language.t("BUTTON ACTIONS", "ДЕЙСТВИЯ КНОПКИ"), style = MaterialTheme.typography.labelLarge)
             }
-            if (!setupReady) {
-                item {
-                    WarningCard(language.t(
-                        "The listener or Nothing package setup is inactive. Open settings to repair it.",
-                        "Служба перехвата или настройка пакетов Nothing неактивна. Откройте настройки.",
-                    ), action = { settingsOpen = true })
+            when {
+                !state.keyReleased -> item {
+                    WarningCard(
+                        text = language.t(
+                            "Essential Key is still owned by Nothing",
+                            "Essential Key всё ещё перехватывает Nothing",
+                        ),
+                        detail = language.t(
+                            "Release the key in Essential Remap settings.",
+                            "Освободите кнопку в настройках Essential Remap.",
+                        ),
+                        actionLabel = language.t("FIX", "ИСПРАВИТЬ"),
+                        action = { settingsOpen = true },
+                    )
+                }
+                !state.serviceEnabled -> item {
+                    WarningCard(
+                        text = language.t(
+                            "Accessibility service is disabled",
+                            "Служба специальных возможностей выключена",
+                        ),
+                        detail = language.t(
+                            "Enable Essential Remap in Accessibility settings.",
+                            "Включите Essential Remap в настройках специальных возможностей.",
+                        ),
+                        actionLabel = language.t("FIX", "ИСПРАВИТЬ"),
+                        action = openAccessibilitySettings,
+                    )
+                }
+                state.competingServices.isNotEmpty() -> item {
+                    WarningCard(
+                        text = language.t(
+                            "Another key remapper is active",
+                            "Активен другой переназначатель кнопок",
+                        ),
+                        detail = language.t(
+                            "Disable the competing key service in Accessibility settings.",
+                            "Отключите конфликтующую службу в настройках специальных возможностей.",
+                        ),
+                        actionLabel = language.t("FIX", "ИСПРАВИТЬ"),
+                        action = openAccessibilitySettings,
+                    )
                 }
             }
             items(PressAction.entries) { gesture ->
@@ -920,6 +984,7 @@ private fun HomeScreen(
             openAssistantSettings,
             openAppInfo,
             openDonate,
+            checkForUpdates,
             beginPackageSetup,
             submitPairingCode,
             cancelPackageSetup,
@@ -1223,6 +1288,7 @@ private fun SettingsDialog(
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
+    checkForUpdates: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     submitPairingCode: (String) -> Unit,
     cancelPackageSetup: () -> Unit,
@@ -1356,12 +1422,23 @@ private fun SettingsDialog(
                     )
                     HorizontalDivider()
                     SectionLabel(language.t("LANGUAGE", "ЯЗЫК"))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LanguageChoice("RU", language == AppLanguage.RUSSIAN, Modifier.weight(1f)) { changeLanguage(AppLanguage.RUSSIAN) }
-                        LanguageChoice("EN", language == AppLanguage.ENGLISH, Modifier.weight(1f)) { changeLanguage(AppLanguage.ENGLISH) }
+                    AppLanguage.entries.chunked(5).forEach { rowLanguages ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            rowLanguages.forEach { item ->
+                                LanguageChoice(
+                                    item.shortLabel,
+                                    language == item,
+                                    Modifier.weight(1f),
+                                ) { changeLanguage(item) }
+                            }
+                        }
                     }
                     HorizontalDivider()
                     SectionLabel(language.t("APP", "ПРИЛОЖЕНИЕ"))
+                    SettingsRow(language.t("Check for updates", "Проверить обновления"), null, checkForUpdates)
                     SettingsRow(language.t("Run setup again", "Повторить первоначальную настройку"), null) { dismiss(); runSetupAgain() }
                     SettingsRow(language.t("Android app info", "Информация о приложении"), null, openAppInfo)
                     DangerWarningCard(
@@ -1370,7 +1447,7 @@ private fun SettingsDialog(
                             "Перед удалением Essential Remap нажмите «Откатить», чтобы вернуть Essential Space. Простое удаление APK не включит компоненты Nothing обратно.",
                         ),
                     )
-                    SettingsRow("Donate", "github.com/AbdulKus/donate", openDonate)
+                    SettingsRow(language.t("Donate", "Поддержать"), "abdulkus.github.io/donate", openDonate)
                     DiagnosticsActions(language, copyDiagnostics, clearDiagnostics)
                     Spacer(Modifier.height(12.dp))
                 }
@@ -1381,8 +1458,16 @@ private fun SettingsDialog(
 
 @Composable
 private fun LanguageChoice(label: String, selected: Boolean, modifier: Modifier, click: () -> Unit) {
-    if (selected) Button(onClick = click, modifier = modifier) { Text(label) }
-    else OutlinedButton(onClick = click, modifier = modifier) { Text(label) }
+    val contentPadding = PaddingValues(horizontal = 2.dp, vertical = 9.dp)
+    if (selected) {
+        Button(onClick = click, modifier = modifier, contentPadding = contentPadding) {
+            Text(label, maxLines = 1, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+        }
+    } else {
+        OutlinedButton(onClick = click, modifier = modifier, contentPadding = contentPadding) {
+            Text(label, maxLines = 1, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+        }
+    }
 }
 
 @Composable
@@ -1412,17 +1497,36 @@ private fun StatusCard(success: Boolean, title: String, detail: String) {
 }
 
 @Composable
-private fun WarningCard(text: String, action: (() -> Unit)? = null) {
+private fun WarningCard(
+    text: String,
+    detail: String? = null,
+    actionLabel: String? = null,
+    action: (() -> Unit)? = null,
+) {
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         shape = MaterialTheme.shapes.medium,
-        modifier = if (action != null) Modifier.fillMaxWidth().clickable(onClick = action) else Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Warning, contentDescription = null)
-            Text(text, modifier = Modifier.padding(start = 10.dp).weight(1f), style = MaterialTheme.typography.bodySmall)
-            if (action != null) Icon(Icons.Default.KeyboardArrowRight, contentDescription = null)
+            Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                Text(text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                detail?.let {
+                    Text(
+                        it,
+                        modifier = Modifier.padding(top = 2.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                    )
+                }
+            }
+            if (action != null) {
+                TextButton(onClick = action) {
+                    Text(actionLabel ?: "FIX", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -1495,7 +1599,7 @@ private fun MiniMark() {
     }
 }
 
-private fun AppLanguage.t(en: String, ru: String): String = if (this == AppLanguage.RUSSIAN) ru else en
+private fun AppLanguage.t(en: String, ru: String): String = translate(en, ru)
 
 private fun PressAction.glyph(): String = when (this) {
     PressAction.SINGLE -> "1×"

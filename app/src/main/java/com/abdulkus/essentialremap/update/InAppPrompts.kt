@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.abdulkus.essentialremap.ui.AppLanguage
+import com.abdulkus.essentialremap.ui.translate
 
 @Composable
 fun InAppPromptHost(
@@ -198,7 +199,7 @@ private fun PromptButtons(
     }
 }
 
-private fun AppLanguage.t(en: String, ru: String): String = if (this == AppLanguage.RUSSIAN) ru else en
+private fun AppLanguage.t(en: String, ru: String): String = translate(en, ru)
 
 private fun formatMegabytes(bytes: Long): String =
     String.format("%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))

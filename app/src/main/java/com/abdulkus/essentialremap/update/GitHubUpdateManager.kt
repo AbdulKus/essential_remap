@@ -45,7 +45,9 @@ class GitHubUpdateManager(context: Context) {
     suspend fun checkForUpdate(): GitHubRelease? = withContext(Dispatchers.IO) {
         val connection = openConnection(LATEST_RELEASE_API)
         try {
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return@withContext null
+            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                error("GitHub API HTTP ${connection.responseCode}")
+            }
             val payload = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(payload)
             if (json.optBoolean("draft", false) || json.optBoolean("prerelease", false)) return@withContext null
