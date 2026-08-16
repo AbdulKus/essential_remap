@@ -55,7 +55,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -201,49 +200,48 @@ fun EssentialRemapApp(
 
 @Composable
 private fun LanguageScreen(select: (AppLanguage) -> Unit) {
-    MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFFD71920))) {
-        Box(
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(24.dp),
+    ) {
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFFF2F2EF))
-                .padding(24.dp),
+                .align(Alignment.Center)
+                .widthIn(max = 560.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .widthIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                EssentialMark()
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "CHOOSE LANGUAGE",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                )
-                Text(
-                    "Choose your language · Выберите язык",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF62625E),
-                    modifier = Modifier.padding(top = 6.dp, bottom = 20.dp),
-                )
-                AppLanguage.entries.chunked(2).forEach { rowLanguages ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        rowLanguages.forEach { item ->
-                            LanguageButton(
-                                language = item,
-                                modifier = Modifier.weight(1f),
-                            ) { select(item) }
-                        }
-                        if (rowLanguages.size == 1) Spacer(Modifier.weight(1f))
+            EssentialMark()
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "CHOOSE LANGUAGE",
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                "Choose your language · Выберите язык",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 20.dp),
+            )
+            AppLanguage.entries.chunked(2).forEach { rowLanguages ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    rowLanguages.forEach { item ->
+                        LanguageButton(
+                            language = item,
+                            modifier = Modifier.weight(1f),
+                        ) { select(item) }
                     }
-                    Spacer(Modifier.height(10.dp))
+                    if (rowLanguages.size == 1) Spacer(Modifier.weight(1f))
                 }
+                Spacer(Modifier.height(10.dp))
             }
         }
     }
@@ -257,7 +255,7 @@ private fun LanguageButton(
 ) {
     Surface(
         modifier = modifier.clickable(onClick = onClick),
-        color = Color.White,
+        color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(18.dp),
     ) {
         Row(

@@ -82,8 +82,8 @@ data class HapticProfile(
 object HapticEffectSelector {
     fun profile(strength: HapticStrength): HapticProfile = when (strength) {
         HapticStrength.OFF -> error("Off has no vibration effect")
-        HapticStrength.LIGHT -> HapticProfile(durationMs = 18L, amplitude = 70)
-        HapticStrength.MEDIUM -> HapticProfile(durationMs = 32L, amplitude = 150)
-        HapticStrength.STRONG -> HapticProfile(durationMs = 50L, amplitude = 255)
+        HapticStrength.LIGHT -> HapticProfile(durationMs = 12L, amplitude = 40)
+        HapticStrength.MEDIUM -> HapticProfile(durationMs = 30L, amplitude = 150)
+        HapticStrength.STRONG -> HapticProfile(durationMs = 55L, amplitude = 255)
     }
 }

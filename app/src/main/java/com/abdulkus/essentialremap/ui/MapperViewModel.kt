@@ -270,18 +270,15 @@ class MapperViewModel(
     }
 
     fun previewHaptic(strength: HapticStrength) {
-        val message = when (hapticEngine.perform(strength)) {
-            HapticResult.PLAYED -> "${strength.displayName()} haptic played"
-            HapticResult.OFF -> "Haptic feedback is off"
-            HapticResult.UNAVAILABLE -> "This device has no vibrator"
-            HapticResult.SYSTEM_DISABLED -> "Enable touch feedback in system settings"
-            HapticResult.FAILED -> "Haptic feedback could not be played"
+        when (hapticEngine.perform(strength)) {
+            HapticResult.PLAYED,
+            HapticResult.OFF,
+            -> Unit
+            HapticResult.UNAVAILABLE -> _messages.tryEmit("This device has no vibrator")
+            HapticResult.SYSTEM_DISABLED -> _messages.tryEmit("Enable touch feedback in system settings")
+            HapticResult.FAILED -> _messages.tryEmit("Haptic feedback could not be played")
         }
-        _messages.tryEmit(message)
     }
-
-    private fun HapticStrength.displayName(): String =
-        name.lowercase().replaceFirstChar(Char::uppercase)
 
     private fun updateAction(gesture: PressAction, action: ConfiguredAction) {
         _uiState.update { current ->
