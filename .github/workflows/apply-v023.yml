@@ -21,6 +21,9 @@ jobs:
       - name: Apply patch
         run: python .github/scripts/apply_v023.py
 
+      - name: Keep release workflow unchanged for this bot commit
+        run: git checkout HEAD -- .github/workflows/android.yml
+
       - name: Remove one-shot files
         run: rm .github/scripts/apply_v023.py .github/workflows/apply-v023.yml
 
