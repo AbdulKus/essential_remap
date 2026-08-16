@@ -14,7 +14,7 @@ enum class AppLanguage(
     FRENCH("fr", "FR", "Français"),
     POLISH("pl", "PL", "Polski"),
     UKRAINIAN("uk", "UA", "Українська"),
-    INDONESIAN("id", "IN", "Bahasa Indonesia"),
+    HINDI("hi", "HI", "हिन्दी"),
     CHINESE("zh", "CH", "中文"),
     JAPANESE("ja", "JP", "日本語"),
     KOREAN("ko", "KO", "한국어");
@@ -24,7 +24,7 @@ enum class AppLanguage(
             val normalized = code?.trim()?.lowercase() ?: return null
             return entries.firstOrNull { it.code == normalized } ?: when (normalized) {
                 "ua" -> UKRAINIAN
-                "in" -> INDONESIAN
+                "in", "id" -> HINDI
                 "ch", "cn" -> CHINESE
                 "jp" -> JAPANESE
                 "kr" -> KOREAN

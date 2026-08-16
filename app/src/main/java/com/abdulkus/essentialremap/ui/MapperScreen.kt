@@ -1099,9 +1099,13 @@ private fun HapticCard(
             Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 HapticStrength.entries.forEach { strength ->
                     val selected = strength == value
-                    if (selected) Button(onClick = { preview(strength) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    val selectAndPreview = {
+                        update(strength)
+                        preview(strength)
+                    }
+                    if (selected) Button(onClick = selectAndPreview, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text(strength.title(language), maxLines = 1)
-                    } else OutlinedButton(onClick = { update(strength) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    } else OutlinedButton(onClick = selectAndPreview, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) {
                         Text(strength.title(language), maxLines = 1)
                     }
                 }

@@ -8,13 +8,16 @@ package com.abdulkus.essentialremap.ui
 internal fun AppLanguage.translate(en: String, ru: String): String {
     if (this == AppLanguage.ENGLISH) return en
     if (this == AppLanguage.RUSSIAN) return ru
+    if (this == AppLanguage.HINDI) {
+        dynamicTranslation(en)?.let { return it }
+        return hindiTranslations[en] ?: en
+    }
     dynamicTranslation(en)?.let { return it }
     val index = when (this) {
         AppLanguage.GERMAN -> 0
         AppLanguage.FRENCH -> 1
         AppLanguage.POLISH -> 2
         AppLanguage.UKRAINIAN -> 3
-        AppLanguage.INDONESIAN -> 4
         AppLanguage.CHINESE -> 5
         AppLanguage.JAPANESE -> 6
         AppLanguage.KOREAN -> 7
@@ -31,7 +34,7 @@ private fun AppLanguage.dynamicTranslation(en: String): String? {
             AppLanguage.FRENCH -> "La mise à jour $version est disponible"
             AppLanguage.POLISH -> "Dostępna jest aktualizacja $version"
             AppLanguage.UKRAINIAN -> "Доступне оновлення $version"
-            AppLanguage.INDONESIAN -> "Pembaruan $version tersedia"
+            AppLanguage.HINDI -> "अपडेट $version उपलब्ध है"
             AppLanguage.CHINESE -> "发现更新 $version"
             AppLanguage.JAPANESE -> "アップデート $version を利用できます"
             AppLanguage.KOREAN -> "업데이트 $version 사용 가능"
@@ -47,7 +50,7 @@ private fun AppLanguage.dynamicTranslation(en: String): String? {
             AppLanguage.FRENCH -> "Un autre remappeur de touches est actif : $names. Désactivez sa règle Essential Key pour éviter les actions en double."
             AppLanguage.POLISH -> "Aktywny jest inny remapper przycisków: $names. Wyłącz w nim regułę Essential Key, aby uniknąć podwójnych akcji."
             AppLanguage.UKRAINIAN -> "Активний інший перепризначувач кнопок: $names. Вимкніть у ньому правило Essential Key, щоб уникнути дублювання дій."
-            AppLanguage.INDONESIAN -> "Aplikasi pemetaan tombol lain sedang aktif: $names. Nonaktifkan aturan Essential Key di sana agar tindakan tidak berjalan dua kali."
+            AppLanguage.HINDI -> "एक और बटन रीमैपर सक्रिय है: $names. दोहरी कार्रवाई से बचने के लिए उसमें Essential Key नियम बंद करें।"
             AppLanguage.CHINESE -> "另一个按键映射应用正在运行：$names。请关闭其中的 Essential Key 规则，以免重复执行操作。"
             AppLanguage.JAPANESE -> "別のキーリマップアプリが有効です: $names。操作の重複を防ぐため、そのアプリの Essential Key ルールを無効にしてください。"
             AppLanguage.KOREAN -> "다른 키 리매퍼가 활성화되어 있습니다: $names. 동작이 중복되지 않도록 해당 앱의 Essential Key 규칙을 꺼 주세요."
