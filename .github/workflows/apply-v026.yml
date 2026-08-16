@@ -1,0 +1,29 @@
+name: Apply v0.1.26 patch
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-v026.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply patch
+        run: python .github/patch-v026.py
+      - name: Remove one-shot files
+        run: rm .github/patch-v026.py .github/workflows/apply-v026.yml
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix first-run theme and haptic preview"
+          git push
