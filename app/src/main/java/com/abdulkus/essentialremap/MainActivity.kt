@@ -131,7 +131,7 @@ class MainActivity : ComponentActivity() {
                         openDonate = ::openDonate,
                         checkForUpdates = { startUpdateCheck(showResult = true) },
                         openSetupVideo = {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/")))
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://youtube.com/shorts/sUQhYFM9mjo")))
                         },
                         beginPackageSetup = ::beginPackageSetup,
                         copyText = ::copyToClipboard,
