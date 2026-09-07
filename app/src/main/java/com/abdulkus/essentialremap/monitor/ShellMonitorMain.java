@@ -1,13 +1,14 @@
 package com.abdulkus.essentialremap.monitor;
 
 import android.net.LocalServerSocket;
-import android.net.LocalSocket;
+import java.net.Socket;
+import java.net.ServerSocket;
+import java.net.InetAddress;
 import android.os.SystemClock;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -18,13 +19,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** app_process entry point, running as shell. No Context, network, alarms, or idle wake lock. */
+/** app_process entry point, running as shell. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
-    private final int appUid;
+    private final String transportSecret = MonitorTransport.newSecret();
+    private volatile int transportPort;
     private final File directory;
     private final ArrayBlockingQueue<MonitorMessage> outbound = new ArrayBlockingQueue<>(32);
     private final ScheduledThreadPoolExecutor timers = new ScheduledThreadPoolExecutor(1);
@@ -36,7 +38,6 @@ public final class ShellMonitorMain {
     private volatile long lastPhysicalElapsed;
 
     private ShellMonitorMain(int appUid, File directory) {
-        this.appUid = appUid;
         this.directory = directory;
         timers.setRemoveOnCancelPolicy(true);
         classifier = new MonitorGestureClassifier(new MonitorGestureClassifier.Scheduler() {
@@ -60,8 +61,9 @@ public final class ShellMonitorMain {
     private void run() throws Exception {
         directory.mkdirs();
         // Binding the abstract socket is also an atomic, kernel-owned single-instance lock.
-        LocalServerSocket server = new LocalServerSocket(MonitorMessage.SOCKET);
-        try {
+        LocalServerSocket instanceLock = new LocalServerSocket(MonitorMessage.SOCKET);
+        try (ServerSocket server = new ServerSocket(0, 4, InetAddress.getByName(MonitorTransport.HOST))) {
+            transportPort = server.getLocalPort();
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 java.lang.Process process = inputProcess;
                 if (process != null) process.destroy();
@@ -71,19 +73,17 @@ public final class ShellMonitorMain {
             thread("essential-input", this::readInput);
             thread("essential-delivery", this::deliver);
             while (true) { // Blocks in accept; does not wake the device to check anything.
-                LocalSocket socket = server.accept();
-                if (socket.getPeerCredentials().getUid() != appUid) {
-                    socket.close();
-                    continue;
-                }
-                Connection next = new Connection(socket);
+                Socket socket = server.accept();
+                Connection next;
+                try { next = new Connection(socket); }
+                catch (Exception rejected) { socket.close(); continue; }
                 Connection previous = connection;
                 connection = next;
                 if (previous != null) previous.close();
                 thread("essential-ack", next::readReplies);
                 emit(inputReady ? "READY" : "RESET", 0, 0);
             }
-        } finally { server.close(); }
+        } finally { instanceLock.close(); }
     }
 
     private void readInput() {
@@ -203,7 +203,8 @@ public final class ShellMonitorMain {
                 // Never spawn a command on the input-reading thread, and always bound its lifetime.
                 String response = command(1_200, "/system/bin/cmd", "activity", "broadcast", "--user", "0",
                     "-f", "0x10000000", "-a", PACKAGE + ".SHELL_KEY_EVENT", "-n", PACKAGE + "/.ShellKeyEventReceiver",
-                    "--es", "bridge_message", message.encode());
+                    "--es", "bridge_message", message.encode(),
+                    "--ei", "bridge_port", Integer.toString(transportPort), "--es", "bridge_secret", transportSecret);
                 log("fallback kind=" + message.kind + " number=" + message.number + " result=" + response.replace('\n', ' '));
             } catch (Exception error) {
                 log("delivery failure " + error.getClass().getSimpleName());
@@ -212,13 +213,16 @@ public final class ShellMonitorMain {
     }
 
     private final class Connection {
-        private final LocalSocket socket;
+        private final Socket socket;
+        private final BufferedReader reader;
         private final PrintWriter writer;
         private long acknowledged;
         private boolean closed;
-        Connection(LocalSocket socket) throws Exception {
+        Connection(Socket socket) throws Exception {
             this.socket = socket;
-            writer = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            MonitorTransport channel = MonitorTransport.server(socket, transportSecret);
+            writer = channel.output;
+            reader = channel.input;
         }
         synchronized boolean send(MonitorMessage message) {
             if (closed) return false;
@@ -233,9 +237,9 @@ public final class ShellMonitorMain {
             return acknowledged >= message.number;
         }
         void readReplies() {
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
+            try {
                 String line;
-                while ((line = reader.readLine()) != null && line.length() < 80) {
+                while ((line = MonitorTransport.readLine(reader)) != null) {
                     if (line.startsWith("ACK ")) {
                         long number = Long.parseLong(line.substring(4));
                         synchronized (this) { acknowledged = Math.max(acknowledged, number); notifyAll(); }

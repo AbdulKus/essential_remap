@@ -38,7 +38,7 @@ Nothing OS normally reserves the button for Essential Space. To enable the key o
 - keep `nt_block_essential_key=1`;
 - install and start a small **shell monitor** for screen-off key handling.
 
-The monitor runs under Android's non-root `shell` user. A small Java helper, launched through `app_process`, waits for Essential Key events from `gpio-keys` using `getevent`. It classifies presses at the input source and sends them over a local Unix socket that verifies both peers' UIDs. Transport delays cannot turn a tap into a hold. A DUMP-protected explicit broadcast is used only when the socket is unavailable to help reconnect the app.
+The monitor runs under Android's non-root `shell` user. A small Java helper, launched through `app_process`, waits for Essential Key events from `gpio-keys` using `getevent`. It classifies presses at the input source and sends them over a loopback socket bound to `127.0.0.1`, with mutual HMAC authentication using a fresh 256-bit secret. Transport delays cannot turn a tap into a hold. A DUMP-protected explicit broadcast bootstraps the private connection and helps reconnect the app when the socket is unavailable. The connection never leaves the phone.
 
 Input and delivery have separate threads, bounded queues, stale-event rejection and duplicate-action receipts. Reader/helper crashes trigger a limited number of recovery attempts. During normal idle operation there is no polling, network traffic, heartbeat, wakeup alarm or CPU wake lock. Short partial wake locks cover the input handoff, gesture and action only; they do not light the display. Allow unrestricted battery use in Android settings for deep-sleep handling. The status checks a live connection rather than just remembering a successful installation.
 
@@ -100,7 +100,7 @@ Nothing OS по умолчанию резервирует кнопку для Es
 - сохраняет `nt_block_essential_key=1`;
 - устанавливает и запускает небольшой **shell-monitor** для обработки кнопки при выключенном дисплее.
 
-Монитор работает от пользователя Android `shell`, без root. Небольшой Java-процесс запускается через `app_process`, ожидает события Essential Key через `getevent` и определяет жест рядом с источником ввода. С приложением он общается через локальный Unix-сокет с проверкой UID обеих сторон. Задержка доставки не превращает клик в удержание. Защищённый разрешением DUMP broadcast используется только при недоступности сокета, чтобы восстановить связь с приложением.
+Монитор работает от пользователя Android `shell`, без root. Небольшой Java-процесс запускается через `app_process`, ожидает события Essential Key через `getevent` и определяет жест рядом с источником ввода. С приложением он общается через сокет на `127.0.0.1` с взаимной HMAC-аутентификацией и новым 256-битным секретом. Задержка доставки не превращает клик в удержание. Защищённый разрешением DUMP broadcast устанавливает канал связи и восстанавливает его при потере соединения. Данные не покидают телефон.
 
 Чтение и доставка разделены; очереди ограничены, устаревшие события отбрасываются, повторное выполнение защищено подтверждениями. При завершении чтения или helper-процесса выполняется ограниченное число попыток восстановления. В обычном простое нет опроса, сетевого трафика, heartbeat, будильников или CPU wake lock. Короткая блокировка сна покрывает только передачу нажатия, распознавание и действие; экран от неё не загорается. Для работы в глубоком сне разрешите приложению использование батареи без ограничений. Статус проверяет живое соединение, а не только факт прошлой установки.
 

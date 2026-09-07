@@ -33,6 +33,9 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         }
         intent.getStringExtra("bridge_message")?.let { encoded ->
             val bridge = (context.applicationContext as EssentialKeyApplication).container.shellBridge
+            intent.getStringExtra("bridge_secret")?.let { secret ->
+                bridge.configure(intent.getIntExtra("bridge_port", 0), secret)
+            }
             runCatching { bridge.receive(MonitorMessage.parse(encoded), "broadcast") }
                 .onFailure { diagnostics.log("Bridge receiver: rejected malformed message") }
             bridge.requestConnect()

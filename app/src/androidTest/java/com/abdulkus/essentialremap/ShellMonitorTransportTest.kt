@@ -22,7 +22,10 @@ class ShellMonitorTransportTest {
     @Test
     fun freshPendingDownSurvivesTransportReconnectBeforeServiceAttaches() = runProbe(true)
 
-    private fun runProbe(reconnect: Boolean) {
+    @Test
+    fun shellTransportWorksWithDisplayOffAndDeviceIdle() = runProbe(false, idle = true)
+
+    private fun runProbe(reconnect: Boolean, idle: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val app = context.applicationContext as EssentialKeyApplication
@@ -34,6 +37,14 @@ class ShellMonitorTransportTest {
             if (message.isGesture) delivered.countDown()
         }
         val classpath = context.applicationInfo.sourceDir + ":" + instrumentation.context.applicationInfo.sourceDir
+        fun command(text: String): String = instrumentation.uiAutomation.executeShellCommand(text).use {
+            FileInputStream(it.fileDescriptor).bufferedReader().use { reader -> reader.readText() }
+        }
+        if (idle) {
+            command("/system/bin/dumpsys battery unplug")
+            command("/system/bin/input keyevent 223")
+            command("/system/bin/cmd deviceidle force-idle")
+        }
         val shell = instrumentation.uiAutomation.executeShellCommandRwe(
             "/system/bin/env CLASSPATH=$classpath /system/bin/app_process /system/bin " +
                 "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid} ${if (reconnect) "reconnect" else "normal"}",
@@ -49,14 +60,23 @@ class ShellMonitorTransportTest {
                         if (line == "PROBE_READY") ready.countDown()
                     }
                 }
+            } catch (_: java.io.IOException) {
+                // Cleanup closes the descriptor if the bounded probe times out.
             } finally { finished.countDown() }
         }
         thread(isDaemon = true, name = "probe-stderr") {
-            FileInputStream(shell[2].fileDescriptor).bufferedReader().useLines { lines ->
-                lines.forEach { output.append(it).append('\n') }
+            runCatching {
+                FileInputStream(shell[2].fileDescriptor).bufferedReader().useLines { lines ->
+                    lines.forEach { output.append(it).append('\n') }
+                }
             }
         }
         try {
+            if (idle) {
+                val power = context.getSystemService(android.os.PowerManager::class.java)
+                assertTrue("Display must be off for the idle test", !power.isInteractive)
+                assertTrue("Device must be in Doze for the idle test", power.isDeviceIdleMode)
+            }
             val started = ready.await(10, TimeUnit.SECONDS)
             assertTrue("Shell probe did not start: $output", started)
             if (reconnect) {
@@ -74,6 +94,11 @@ class ShellMonitorTransportTest {
         } finally {
             instrumentation.runOnMainSync { app.container.shellBridge.detach(listener) }
             shell.forEach { runCatching { it.close() } }
+            if (idle) {
+                command("/system/bin/cmd deviceidle unforce")
+                command("/system/bin/dumpsys battery reset")
+                command("/system/bin/input keyevent 224")
+            }
         }
     }
 }

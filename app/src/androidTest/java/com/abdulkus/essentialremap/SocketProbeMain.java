@@ -1,45 +1,55 @@
 package com.abdulkus.essentialremap;
 
-import android.net.LocalServerSocket;
-import android.net.LocalSocket;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.InetAddress;
+import com.abdulkus.essentialremap.monitor.MonitorTransport;
+import java.util.concurrent.TimeUnit;
 import android.os.SystemClock;
 import com.abdulkus.essentialremap.monitor.MonitorMessage;
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.SocketTimeoutException;
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /** Test APK only: exercises the real shell-to-app socket and ACK path on Android. */
 public final class SocketProbeMain {
     public static void main(String[] args) throws Exception {
         if (android.os.Process.myUid() != 2000) throw new AssertionError("probe is not shell");
-        LocalServerSocket server = new LocalServerSocket(MonitorMessage.SOCKET);
+        ServerSocket server = new ServerSocket(0, 4, InetAddress.getByName(MonitorTransport.HOST));
+        String secret = MonitorTransport.newSecret();
+        String session = UUID.randomUUID().toString().replace("-", "");
         System.out.println("PROBE_READY");
         System.out.flush();
         try {
-            LocalSocket peer = server.accept();
+            Process bootstrap = new ProcessBuilder("/system/bin/cmd", "activity", "broadcast", "--user", "0",
+                "-f", "0x10000000", "-a", "com.abdulkus.essentialremap.SHELL_KEY_EVENT", "-n",
+                "com.abdulkus.essentialremap/.ShellKeyEventReceiver", "--es", "bridge_message",
+                new MonitorMessage(session, 1, "READY", 0, 0, SystemClock.elapsedRealtime()).encode(),
+                "--ei", "bridge_port", Integer.toString(server.getLocalPort()), "--es", "bridge_secret", secret).start();
+            if (!bootstrap.waitFor(3, TimeUnit.SECONDS) || bootstrap.exitValue() != 0) {
+                bootstrap.destroyForcibly();
+                throw new AssertionError("protected bootstrap failed");
+            }
+            Socket peer = server.accept();
             try {
-                if (peer.getPeerCredentials().getUid() != Integer.parseInt(args[0])) throw new AssertionError("unexpected app UID");
+                MonitorTransport channel = MonitorTransport.server(peer, secret);
                 peer.setSoTimeout(3000);
-                PrintWriter out = new PrintWriter(new OutputStreamWriter(peer.getOutputStream(), StandardCharsets.UTF_8), true);
-                BufferedReader in = new BufferedReader(new InputStreamReader(peer.getInputStream(), StandardCharsets.UTF_8));
-                String session = UUID.randomUUID().toString().replace("-", "");
-                send(out, in, new MonitorMessage(session, 1, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                PrintWriter out = channel.output;
+                BufferedReader in = channel.input;
+                send(out, in, new MonitorMessage(session, 2, "READY", 0, 0, SystemClock.elapsedRealtime()));
                 long down = SystemClock.uptimeMillis() * 1_000_000L;
-                send(out, in, new MonitorMessage(session, 2, "DOWN", down, down, SystemClock.elapsedRealtime()));
-                long actionNumber = 3;
+                send(out, in, new MonitorMessage(session, 3, "DOWN", down, down, SystemClock.elapsedRealtime()));
+                long actionNumber = 4;
                 if (args.length > 1 && args[1].equals("reconnect")) {
                     peer.close();
                     peer = server.accept();
-                    if (peer.getPeerCredentials().getUid() != Integer.parseInt(args[0])) throw new AssertionError("unexpected reconnect UID");
+                    channel = MonitorTransport.server(peer, secret);
                     peer.setSoTimeout(3000);
-                    out = new PrintWriter(new OutputStreamWriter(peer.getOutputStream(), StandardCharsets.UTF_8), true);
-                    in = new BufferedReader(new InputStreamReader(peer.getInputStream(), StandardCharsets.UTF_8));
-                    send(out, in, new MonitorMessage(session, 3, "READY", 0, 0, SystemClock.elapsedRealtime()));
-                    actionNumber = 4;
+                    out = channel.output;
+                    in = channel.input;
+                    send(out, in, new MonitorMessage(session, 4, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                    actionNumber = 5;
                 } else {
                     SystemClock.sleep(60);
                 }

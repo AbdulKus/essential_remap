@@ -1,8 +1,10 @@
 package com.abdulkus.essentialremap
 
 import android.content.Context
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
+import java.net.Socket
+import java.net.InetSocketAddress
+import com.abdulkus.essentialremap.monitor.MonitorTransport
+import android.provider.Settings
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -22,12 +24,20 @@ import kotlinx.coroutines.launch
 class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnostics) {
     private val appContext = context.applicationContext
     private val preferences = UserPreferences(appContext)
+    private val credentials = appContext.getSharedPreferences("shell_monitor_transport", Context.MODE_PRIVATE)
+    private data class Endpoint(val port: Int, val secret: String)
+    @Volatile private var endpoint: Endpoint? = if (credentials.getInt("boot", -2) ==
+        Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT, -1)) {
+        val port = credentials.getInt("port", 0)
+        val secret = credentials.getString("secret", null)
+        if (port in 1024..65535 && MonitorTransport.validSecret(secret)) Endpoint(port, secret!!) else null
+    } else null
     private val receipts = appContext.getSharedPreferences("shell_monitor_receipts", Context.MODE_PRIVATE)
     private val power = appContext.getSystemService(PowerManager::class.java)
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connecting = AtomicBoolean(false)
-    @Volatile private var socket: LocalSocket? = null
+    @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var lastReadyElapsed = 0L
     @Volatile private var lastReport = "transport=disconnected"
@@ -39,8 +49,19 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     private val handoff = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.abdulkus.essentialremap:input-handoff")
         .apply { setReferenceCounted(false) }
 
+    /** Called exclusively after the manifest DUMP permission and sender checks in the receiver. */
+    fun configure(port: Int, secret: String) {
+        if (port !in 1024..65535 || !MonitorTransport.validSecret(secret)) return
+        val next = Endpoint(port, secret)
+        if (endpoint == next) return
+        endpoint = next
+        credentials.edit().putInt("port", port).putString("secret", secret)
+            .putInt("boot", Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT, -1)).apply()
+        closeSocket()
+    }
+
     fun requestConnect() {
-        if (!preferences.screenOffEnabled) return
+        if (!preferences.screenOffEnabled || endpoint == null) return
         if (socket != null) {
             val requestedAt = SystemClock.elapsedRealtime()
             scope.launch {
@@ -55,21 +76,24 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         }
         if (!connecting.compareAndSet(false, true)) return
         scope.launch {
+            var attemptedEndpoint = endpoint
             try {
                 repeat(3) { attempt ->
                     if (attempt > 0) delay(250L shl attempt)
-                    val candidate = LocalSocket()
+                    val target = endpoint ?: return@launch
+                    attemptedEndpoint = target
+                    val candidate = Socket()
                     try {
-                        candidate.connect(LocalSocketAddress(MonitorMessage.SOCKET, LocalSocketAddress.Namespace.ABSTRACT))
-                        check(candidate.peerCredentials.uid == android.os.Process.SHELL_UID) { "Unexpected peer UID" }
+                        candidate.connect(InetSocketAddress(MonitorTransport.HOST, target.port), 1_000)
+                        val channel = MonitorTransport.client(candidate, target.secret)
                         candidate.soTimeout = 2_000
                         socket = candidate
-                        val output = PrintWriter(candidate.outputStream.bufferedWriter(Charsets.UTF_8), true)
+                        val output = channel.output
                         writer = output
                         output.println("PING")
-                        candidate.inputStream.bufferedReader(Charsets.UTF_8).use { input ->
+                        channel.input.use { input ->
                             while (true) {
-                                val line = input.readLine() ?: break
+                                val line = MonitorTransport.readLine(input) ?: break
                                 val message = MonitorMessage.parse(line)
                                 if (message.kind == "READY") candidate.soTimeout = 0
                                 receive(message, "socket")
@@ -91,6 +115,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                 }
             } finally {
                 connecting.set(false)
+                if (endpoint != attemptedEndpoint) requestConnect()
             }
         }
     }
