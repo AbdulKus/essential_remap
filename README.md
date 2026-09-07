@@ -38,9 +38,11 @@ Nothing OS normally reserves the button for Essential Space. To enable the key o
 - keep `nt_block_essential_key=1`;
 - install and start a small **shell monitor** for screen-off key handling.
 
-The shell monitor runs under Android's non-root `shell` user. It waits directly for input events from the phone's `gpio-keys` device using Android's `getevent` interface and filters for the Essential Key event only. It does not continuously poll the system and does not hold a CPU wake lock while waiting.
+The monitor runs under Android's non-root `shell` user. A small Java helper, launched through `app_process`, waits for Essential Key events from `gpio-keys` using `getevent`. It classifies presses at the input source and sends them over a local Unix socket that verifies both peers' UIDs. Transport delays cannot turn a tap into a hold. A DUMP-protected explicit broadcast is used only when the socket is unavailable to help reconnect the app.
 
-When the Essential Key is pressed with the display off, the shell monitor forwards a narrowly scoped, permission-protected event to Essential Remap. The app then classifies the physical press as single, double or long and executes the action configured by the user. The normal Accessibility path and the shell path are deduplicated so the same physical press is not handled twice.
+Input and delivery have separate threads, bounded queues, stale-event rejection and duplicate-action receipts. Reader/helper crashes trigger a limited number of recovery attempts. During normal idle operation there is no polling, network traffic, heartbeat, wakeup alarm or CPU wake lock. Short partial wake locks cover the input handoff, gesture and action only; they do not light the display. Allow unrestricted battery use in Android settings for deep-sleep handling. The status checks a live connection rather than just remembering a successful installation.
+
+After upgrading to **0.1.28**, restart the sleep monitor once in Settings to install revision 9. Updating the APK alone does not replace an already running shell process. Device verification steps are in [screen-off testing](docs/screen-off-testing.md).
 
 The setup script is installed through the local ADB connection, checked before being activated, and can be restarted from Essential Remap. All package changes are reversible from the app and Essential Space can be restored at any time.
 
@@ -98,9 +100,11 @@ Nothing OS по умолчанию резервирует кнопку для Es
 - сохраняет `nt_block_essential_key=1`;
 - устанавливает и запускает небольшой **shell-monitor** для обработки кнопки при выключенном дисплее.
 
-Shell-monitor работает от системного пользователя Android `shell`, без root. Он напрямую ожидает события устройства `gpio-keys` через стандартный Android-инструмент `getevent` и отфильтровывает только событие Essential Key. Постоянного опроса системы нет, CPU wake lock во время ожидания не удерживается.
+Монитор работает от пользователя Android `shell`, без root. Небольшой Java-процесс запускается через `app_process`, ожидает события Essential Key через `getevent` и определяет жест рядом с источником ввода. С приложением он общается через локальный Unix-сокет с проверкой UID обеих сторон. Задержка доставки не превращает клик в удержание. Защищённый разрешением DUMP broadcast используется только при недоступности сокета, чтобы восстановить связь с приложением.
 
-Когда Essential Key нажимается при выключенном экране, shell-monitor передаёт в Essential Remap узко ограниченное, защищённое разрешением событие. Приложение определяет, было это одиночное нажатие, двойное или удержание, и выполняет действие, выбранное пользователем. События от Accessibility и shell-monitor дедуплицируются, поэтому одно физическое нажатие не выполняется дважды.
+Чтение и доставка разделены; очереди ограничены, устаревшие события отбрасываются, повторное выполнение защищено подтверждениями. При завершении чтения или helper-процесса выполняется ограниченное число попыток восстановления. В обычном простое нет опроса, сетевого трафика, heartbeat, будильников или CPU wake lock. Короткая блокировка сна покрывает только передачу нажатия, распознавание и действие; экран от неё не загорается. Для работы в глубоком сне разрешите приложению использование батареи без ограничений. Статус проверяет живое соединение, а не только факт прошлой установки.
+
+После обновления до **0.1.28** один раз перезапустите монитор сна в настройках — это установит ревизию 9. Обновление APK само по себе не заменяет уже работающий shell-процесс. Сценарии проверки описаны в [screen-off testing](docs/screen-off-testing.md).
 
 Сам shell-скрипт устанавливается через локальное ADB-соединение, проверяется перед активацией и при необходимости может быть заново запущен прямо из Essential Remap. Все изменения пакетов обратимы, а Essential Space можно восстановить из настроек приложения.
 

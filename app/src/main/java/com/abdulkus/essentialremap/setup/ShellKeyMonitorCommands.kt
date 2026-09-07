@@ -90,6 +90,7 @@ object ShellKeyMonitorCommands {
         }
 
         stop_all_monitors() {
+          : > "${'$'}DIR/stop-requested"
           stale_pids="${'$'}(monitor_pids)"
           for stale_pid in ${'$'}stale_pids; do kill_tree "${'$'}stale_pid" TERM; done
           wait_count=0
@@ -129,6 +130,7 @@ object ShellKeyMonitorCommands {
             /system/bin/cp "${'$'}apk_path" "${'$'}HELPER_APK.new" &&
               /system/bin/chmod 400 "${'$'}HELPER_APK.new" &&
               /system/bin/mv -f "${'$'}HELPER_APK.new" "${'$'}HELPER_APK" || exit 1
+            /system/bin/rm -f "${'$'}DIR/stop-requested"
             if command -v setsid >/dev/null 2>&1; then
               /system/bin/nohup setsid /system/bin/sh "$SCRIPT" run </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             else
@@ -147,12 +149,22 @@ object ShellKeyMonitorCommands {
             ;;
           run)
             trap '' HUP
-            app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap)"
+            app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap | /system/bin/grep -E '^package:com[.]abdulkus[.]essentialremap uid:[0-9]+$')"
             app_uid="${'$'}{app_info##*uid:}"
             case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
             export CLASSPATH="${'$'}HELPER_APK"
-            exec /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
-              com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR"
+            trap 'exit 0' INT TERM
+            restarts=0
+            while [ "${'$'}restarts" -lt 3 ] && [ ! -e "${'$'}DIR/stop-requested" ]; do
+              /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
+                com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR" &
+              helper_pid=${'$'}!
+              wait "${'$'}helper_pid"
+              [ -e "${'$'}DIR/stop-requested" ] && break
+              restarts=${'$'}((restarts + 1))
+              log_monitor "helper exited; recovery=${'$'}restarts/3"
+              [ "${'$'}restarts" -lt 3 ] && /system/bin/sleep "${'$'}restarts"
+            done
             ;;
           stop)
             acquire_lock || exit 1

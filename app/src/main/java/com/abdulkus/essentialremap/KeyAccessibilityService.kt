@@ -156,6 +156,7 @@ class KeyAccessibilityService : AccessibilityService() {
         trace("accessibility service interrupted")
         if (::classifier.isInitialized) classifier.reset()
         finishGestureSequence()
+        finishShellSequence()
     }
 
     override fun onDestroy() {

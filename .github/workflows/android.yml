@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Test, lint and build
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
 
       - name: Verify release APK signature
         run: |
@@ -93,6 +93,7 @@ jobs:
         run: |
           cp app/build/outputs/apk/debug/app-debug.apk "essential-remap-${APP_VERSION}-debug.apk"
           cp app/build/outputs/apk/release/app-release.apk "essential-remap-${APP_VERSION}.apk"
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk "essential-remap-${APP_VERSION}-androidTest.apk"
           sha256sum "essential-remap-${APP_VERSION}.apk" > "essential-remap-${APP_VERSION}.apk.sha256"
 
       - name: Upload build artifacts
@@ -103,6 +104,7 @@ jobs:
             essential-remap-${{ env.APP_VERSION }}.apk
             essential-remap-${{ env.APP_VERSION }}.apk.sha256
             essential-remap-${{ env.APP_VERSION }}-debug.apk
+            essential-remap-${{ env.APP_VERSION }}-androidTest.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -129,3 +131,36 @@ jobs:
           files: |
             essential-remap-${{ env.APP_VERSION }}.apk
             essential-remap-${{ env.APP_VERSION }}.apk.sha256
+
+  transport-smoke:
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: essential-remap-${{ env.APP_VERSION }}
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Verify shell-to-app transport on Android 16
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install "essential-remap-${APP_VERSION}-debug.apk"
+            adb install "essential-remap-${APP_VERSION}-androidTest.apk"
+            adb shell am instrument -w -e class com.abdulkus.essentialremap.ShellMonitorTransportTest com.abdulkus.essentialremap.test/androidx.test.runner.AndroidJUnitRunner > transport-result.txt
+            cat transport-result.txt
+            grep -q 'OK (1 test)' transport-result.txt
+      - name: Upload transport result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-16-transport-result
+          path: transport-result.txt
