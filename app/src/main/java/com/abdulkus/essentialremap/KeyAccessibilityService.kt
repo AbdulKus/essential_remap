@@ -9,6 +9,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import com.abdulkus.essentialremap.monitor.MonitorMessage
+import com.abdulkus.essentialremap.ui.UserPreferences
 import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -40,6 +42,9 @@ class KeyAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var actionExecutor: ActionExecutor
     private var gestureSequenceActive = false
+    private var gestureFirstDownNs = 0L
+    private var gestureLastDownNs = 0L
+    private val actionGate = GestureActionGate()
     private var gestureStartedWhileLocked = false
     private var gestureStartedScreenOff = false
     private var activeWakeLock: PowerManager.WakeLock? = null
@@ -50,10 +55,18 @@ class KeyAccessibilityService : AccessibilityService() {
     private val shellKeyListener: (ScreenOffKeyEvent) -> Unit = { event ->
         mainHandler.post { handleScreenOffKeyEvent(event) }
     }
+    private lateinit var shellBridge: ShellMonitorBridge
+    private var shellGroup: String? = null
+    private var shellStartedLocked = false
+    private var shellStartedOff = false
+    private var shellPhysicalDownNs = 0L
+    private var shellWakeLock: PowerManager.WakeLock? = null
+    private val sourceGestureListener: (MonitorMessage, Boolean) -> Unit = ::handleSourceGesture
     @Volatile private var currentSettings = AppSettings()
 
     override fun onServiceConnected() {
         val container = (application as EssentialKeyApplication).container
+        shellBridge = container.shellBridge
         repository = container.repository
         hapticEngine = container.hapticEngine
         diagnostics = container.diagnostics
@@ -84,6 +97,7 @@ class KeyAccessibilityService : AccessibilityService() {
                     if (!shellListenerAttached) {
                         val queuedEvents = ShellKeyEventBus.attach(shellKeyListener)
                         shellListenerAttached = true
+                        shellBridge.attach(sourceGestureListener)
                         trace("shell event listener attached; queuedEvents=$queuedEvents")
                     }
                     applyRuntimeState()
@@ -109,6 +123,14 @@ class KeyAccessibilityService : AccessibilityService() {
         if (!currentSettings.remappingEnabled) {
             trace("accessibility event ignored: remapping disabled")
             return false
+        }
+
+        val belongsToShell = shellStartedOff &&
+            kotlin.math.abs(event.downTime * NANOS_PER_MILLISECOND - shellPhysicalDownNs) <= 2_000_000L
+        if (belongsToShell || (!powerManager.isInteractive && ScreenOffKeyAccess.runtimeHealthy &&
+                UserPreferences(this).screenOffEnabled)) {
+            trace("accessibility duplicate suppressed: source monitor owns screen-off press")
+            return true
         }
 
         when (event.action) {
@@ -137,6 +159,7 @@ class KeyAccessibilityService : AccessibilityService() {
         trace("accessibility service interrupted")
         if (::classifier.isInitialized) classifier.reset()
         finishGestureSequence()
+        finishShellSequence()
     }
 
     override fun onDestroy() {
@@ -145,6 +168,8 @@ class KeyAccessibilityService : AccessibilityService() {
         if (shellListenerAttached) ShellKeyEventBus.detach(shellKeyListener)
         shellListenerAttached = false
         finishGestureSequence()
+        if (::shellBridge.isInitialized) shellBridge.detach(sourceGestureListener)
+        finishShellSequence()
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -153,11 +178,26 @@ class KeyAccessibilityService : AccessibilityService() {
         val startedWhileLocked = gestureStartedWhileLocked
         val startedScreenOff = gestureStartedScreenOff
         val wakeLock = activeWakeLock
+        val mayDispatch = actionGate.claim(gestureFirstDownNs, gestureLastDownNs)
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
         gestureStartedScreenOff = false
         activeWakeLock = null
 
+        if (!mayDispatch) {
+            releaseWakeLock(wakeLock)
+            trace("duplicate physical gesture discarded after transport handover")
+            return
+        }
+        dispatchAction(action, startedWhileLocked, startedScreenOff, wakeLock)
+    }
+
+    private fun dispatchAction(
+        action: PressAction,
+        startedWhileLocked: Boolean,
+        startedScreenOff: Boolean,
+        wakeLock: PowerManager.WakeLock?,
+    ) {
         trace(
             "gesture classified: press=$action startedScreenOff=$startedScreenOff " +
                 "startedLocked=$startedWhileLocked",
@@ -214,6 +254,62 @@ class KeyAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun handleSourceGesture(message: MonitorMessage, interactive: Boolean) {
+        if (message.kind == "RESET") {
+            finishShellSequence()
+            return
+        }
+        val group = "${message.session}:${message.downNs}"
+        if (message.kind == "DOWN") {
+            if (shellGroup != group) {
+                finishShellSequence()
+                shellGroup = group
+                shellStartedOff = !interactive
+                shellStartedLocked = !interactive || keyguardManager.isKeyguardLocked
+            }
+            shellPhysicalDownNs = message.eventNs
+            if (!shellStartedOff || !currentSettings.remappingEnabled) return
+            // Only one path owns this gesture, including a DOWN duplicated by Accessibility.
+            classifier.reset()
+            finishGestureSequence()
+            if (shellWakeLock?.isHeld != true) {
+                shellWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG).apply {
+                    setReferenceCounted(false)
+                    acquire(WAKE_LOCK_TIMEOUT_MS)
+                }
+            }
+            return
+        }
+        if (shellGroup != group || !shellStartedOff) {
+            trace("source gesture ignored: no matching screen-off DOWN kind=${message.kind}")
+            return
+        }
+        val action = when (message.kind) {
+            "SINGLE" -> PressAction.SINGLE
+            "DOUBLE" -> PressAction.DOUBLE
+            "LONG" -> PressAction.LONG
+            else -> return
+        }
+        val lock = shellWakeLock
+        shellWakeLock = null
+        if (!actionGate.claim(message.downNs, shellPhysicalDownNs)) {
+            releaseWakeLock(lock)
+            trace("source duplicate discarded: Accessibility already handled the physical press")
+            return
+        }
+        trace("source gesture: press=$action physicalDown=${message.downNs} physicalEvent=${message.eventNs}")
+        dispatchAction(action, shellStartedLocked, true, lock)
+    }
+
+    private fun finishShellSequence() {
+        releaseWakeLock(shellWakeLock)
+        shellWakeLock = null
+        shellGroup = null
+        shellStartedLocked = false
+        shellStartedOff = false
+        shellPhysicalDownNs = 0L
+    }
+
     private fun handlePhysicalKeyDown(
         source: String,
         repeatCount: Int,
@@ -233,7 +329,11 @@ class KeyAccessibilityService : AccessibilityService() {
             trace("key down ignored: completed duplicate without active gesture")
             return
         }
-        if (!gestureSequenceActive) gestureSequenceActive = true
+        if (!gestureSequenceActive) {
+            gestureSequenceActive = true
+            gestureFirstDownNs = downTimeNanos
+        }
+        if (gateResult == PhysicalKeyEventGate.DownResult.NEW) gestureLastDownNs = downTimeNanos
         gestureStartedScreenOff = gestureStartedScreenOff || startedScreenOff
         gestureStartedWhileLocked = gestureStartedWhileLocked ||
             startedScreenOff || keyguardManager.isKeyguardLocked
@@ -305,6 +405,7 @@ class KeyAccessibilityService : AccessibilityService() {
         if (!currentSettings.remappingEnabled) {
             classifier.reset()
             finishGestureSequence()
+            finishShellSequence()
         }
     }
 

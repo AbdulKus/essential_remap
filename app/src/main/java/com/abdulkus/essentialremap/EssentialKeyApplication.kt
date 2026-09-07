@@ -26,6 +26,7 @@ class EssentialKeyApplication : Application() {
             setupCoordinator = EssentialKeySetupCoordinator(this, diagnostics),
             launchableAppsReader = LaunchableAppsReader(this),
             diagnostics = diagnostics,
+            shellBridge = ShellMonitorBridge(this, diagnostics),
         )
     }
 }
@@ -37,4 +38,5 @@ data class AppContainer(
     val setupCoordinator: EssentialKeySetupCoordinator,
     val launchableAppsReader: LaunchableAppsReader,
     val diagnostics: SetupDiagnostics,
+    val shellBridge: ShellMonitorBridge,
 )

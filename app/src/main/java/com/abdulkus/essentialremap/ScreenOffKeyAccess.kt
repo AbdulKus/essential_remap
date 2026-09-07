@@ -13,11 +13,24 @@ object ScreenOffKeyAccess {
     private val mutableChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes: SharedFlow<Unit> = mutableChanges.asSharedFlow()
 
+    @Volatile var runtimeHealthy: Boolean = false
+        private set
+
+    fun setRuntimeHealthy(healthy: Boolean) {
+        if (runtimeHealthy == healthy) return
+        runtimeHealthy = healthy
+        notifyChanged()
+    }
+
     /**
      * A shell process cannot survive a reboot. The boot count and script revision keep the UI from
      * claiming sleep handling is ready after a restart or an app update that replaces the monitor.
      */
     fun isGranted(context: Context): Boolean {
+        return runtimeHealthy && isConfiguredForThisBoot(context)
+    }
+
+    fun isConfiguredForThisBoot(context: Context): Boolean {
         val preferences = preferences(context)
         return preferences.getBoolean(KEY_STARTED, false) &&
             preferences.getInt(KEY_BOOT_COUNT, -1) == bootCount(context) &&
@@ -37,6 +50,7 @@ object ScreenOffKeyAccess {
     }
 
     fun markStopped(context: Context) {
+        runtimeHealthy = false
         preferences(context).edit().clear().apply()
         notifyChanged()
     }

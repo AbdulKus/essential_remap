@@ -26,6 +26,8 @@ class GestureClassifier(
         if (repeatCount != 0 || pressed) return
         pressed = true
         longFired = false
+        singleTask?.cancel()
+        singleTask = null
         longTask?.cancel()
         longTask = scheduler.schedule(longPressMs) {
             if (pressed) {

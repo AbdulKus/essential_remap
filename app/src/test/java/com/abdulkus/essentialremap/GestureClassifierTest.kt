@@ -72,6 +72,22 @@ class GestureClassifierTest {
     }
 
     @Test
+    fun secondDownInsideWindowDoesNotFireSingleWhileSecondPressIsHeld() {
+        val scheduler = FakeScheduler()
+        val actions = mutableListOf<PressAction>()
+        val classifier = GestureClassifier(scheduler, actions::add)
+        classifier.onKeyDown(0)
+        classifier.onKeyUp(false)
+        scheduler.advanceBy(250)
+        classifier.onKeyDown(0)
+        scheduler.advanceBy(100)
+        assertEquals(emptyList<PressAction>(), actions)
+        classifier.onKeyUp(false)
+        scheduler.advanceBy(600)
+        assertEquals(listOf(PressAction.DOUBLE), actions)
+    }
+
+    @Test
     fun canceledPressDoesNotFire() {
         val scheduler = FakeScheduler()
         val actions = mutableListOf<PressAction>()

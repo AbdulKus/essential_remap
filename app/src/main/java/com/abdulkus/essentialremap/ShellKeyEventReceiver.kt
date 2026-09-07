@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
+import com.abdulkus.essentialremap.monitor.MonitorMessage
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import com.abdulkus.essentialremap.ui.UserPreferences
 
@@ -28,6 +29,16 @@ class ShellKeyEventReceiver : BroadcastReceiver() {
         }
         if (!ShellKeyEventSenderPolicy.isAllowed(senderUid)) {
             diagnostics.log("Runtime receiver: rejected sender uid=$senderUid")
+            return
+        }
+        intent.getStringExtra("bridge_message")?.let { encoded ->
+            val bridge = (context.applicationContext as EssentialKeyApplication).container.shellBridge
+            intent.getStringExtra("bridge_secret")?.let { secret ->
+                bridge.configure(intent.getIntExtra("bridge_port", 0), secret)
+            }
+            runCatching { bridge.receive(MonitorMessage.parse(encoded), "broadcast") }
+                .onFailure { diagnostics.log("Bridge receiver: rejected malformed message") }
+            bridge.requestConnect()
             return
         }
         val monitorStatus = intent.getStringExtra(EXTRA_MONITOR_STATUS)

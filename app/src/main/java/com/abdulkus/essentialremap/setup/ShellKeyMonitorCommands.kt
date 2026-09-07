@@ -8,7 +8,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 8
+    const val REVISION = 9
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
@@ -30,20 +30,17 @@ object ShellKeyMonitorCommands {
         STATE_FILE=$STATE_FILE
         LOG_FILE=$LOG_FILE
         MONITOR_REVISION=$REVISION
-        INPUT_DEVICE=
+        HELPER_APK="${'$'}DIR/monitor.apk"
+        LOCK_DIR="${'$'}DIR/operation.lock"
 
-        log_monitor() {
-          echo "${'$'}(/system/bin/date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) ${'$'}*" >> "${'$'}LOG_FILE"
-        }
+        log_monitor() { echo "${'$'}*" >> "$LOG_FILE"; }
 
         is_monitor_pid() {
-          candidate_pid="${'$'}1"
-          case "${'$'}candidate_pid" in ''|*[!0-9]*) return 1 ;; esac
-          candidate_cmdline="/proc/${'$'}candidate_pid/cmdline"
-          [ -r "${'$'}candidate_cmdline" ] || return 1
-          candidate_args="${'$'}(/system/bin/tr '\000' ' ' < "${'$'}candidate_cmdline" 2>/dev/null)"
+          case "${'$'}1" in ''|*[!0-9]*) return 1 ;; esac
+          [ -r "/proc/${'$'}1/cmdline" ] || return 1
+          candidate_args="${'$'}(/system/bin/tr '\000' ' ' < "/proc/${'$'}1/cmdline" 2>/dev/null)"
           case "${'$'}candidate_args" in
-            *"${'$'}SCRIPT"*' run'*) return 0 ;;
+            essential-remap-monitor*|*"$SCRIPT"*' run'*) return 0 ;;
           esac
           return 1
         }
@@ -55,32 +52,47 @@ object ShellKeyMonitorCommands {
             candidate_pid="${'$'}1"
             case "${'$'}candidate_pid" in ''|*[!0-9]*) continue ;; esac
             shift
-            process_args="${'$'}*"
-            case "${'$'}process_args" in
-              *"${'$'}SCRIPT"*' run'*) echo "${'$'}candidate_pid" ;;
+            case "${'$'}*" in
+              essential-remap-monitor*|*"$SCRIPT"*' run'*) echo "${'$'}candidate_pid" ;;
             esac
           done
         }
 
-        kill_tree() {
+        # Each recursive call has its own variable scope, including all Java thread children.
+        kill_tree() (
           target_pid="${'$'}1"
-          case "${'$'}target_pid" in ''|*[!0-9]*) return 0 ;; esac
-          [ "${'$'}target_pid" = "${'$'}${'$'}" ] && return 0
-          children_file="/proc/${'$'}target_pid/task/${'$'}target_pid/children"
-          child_pids=
-          [ -r "${'$'}children_file" ] && IFS= read -r child_pids < "${'$'}children_file"
-          for child_pid in ${'$'}child_pids; do
-            kill_tree "${'$'}child_pid"
+          signal="${'$'}{2:-TERM}"
+          case "${'$'}target_pid" in ''|*[!0-9]*) exit 0 ;; esac
+          [ "${'$'}target_pid" = "${'$'}${'$'}" ] && exit 0
+          for children_file in /proc/"${'$'}target_pid"/task/*/children; do
+            child_pids=
+            [ -r "${'$'}children_file" ] && IFS= read -r child_pids < "${'$'}children_file"
+            for child_pid in ${'$'}child_pids; do kill_tree "${'$'}child_pid" "${'$'}signal"; done
           done
-          /system/bin/kill "${'$'}target_pid" >/dev/null 2>&1
+          /system/bin/kill -"${'$'}signal" "${'$'}target_pid" >/dev/null 2>&1
+        )
+
+        acquire_lock() {
+          /system/bin/mkdir -p "${'$'}DIR"
+          if ! /system/bin/mkdir "${'$'}LOCK_DIR" 2>/dev/null; then
+            owner="${'$'}(/system/bin/cat "${'$'}LOCK_DIR/pid" 2>/dev/null)"
+            case "${'$'}owner" in ''|*[!0-9]*) echo essential-remap:monitor-operation-busy; return 1 ;; esac
+            if /system/bin/kill -0 "${'$'}owner" 2>/dev/null; then
+              echo essential-remap:monitor-operation-busy
+              return 1
+            fi
+            /system/bin/rm -f "${'$'}LOCK_DIR/pid"
+            /system/bin/rmdir "${'$'}LOCK_DIR" 2>/dev/null || return 1
+            /system/bin/mkdir "${'$'}LOCK_DIR" 2>/dev/null || return 1
+          fi
+          echo "${'$'}${'$'}" > "${'$'}LOCK_DIR/pid"
+          trap '/system/bin/rm -f "${'$'}LOCK_DIR/pid"; /system/bin/rmdir "${'$'}LOCK_DIR" 2>/dev/null' EXIT
         }
 
         stop_all_monitors() {
+          : > "${'$'}DIR/stop-requested"
           stale_pids="${'$'}(monitor_pids)"
-          log_monitor "cleanup begin revision=${'$'}MONITOR_REVISION stalePids=${'$'}{stale_pids:-none}"
-          for stale_pid in ${'$'}stale_pids; do
-            kill_tree "${'$'}stale_pid"
-          done
+          for stale_pid in ${'$'}stale_pids; do kill_tree "${'$'}stale_pid" TERM; done
           wait_count=0
           while [ "${'$'}wait_count" -lt 30 ]; do
             remaining="${'$'}(monitor_pids)"
@@ -88,235 +100,86 @@ object ShellKeyMonitorCommands {
             /system/bin/sleep 0.1
             wait_count=${'$'}((wait_count + 1))
           done
+          for stale_pid in ${'$'}(monitor_pids); do kill_tree "${'$'}stale_pid" 9; done
           remaining="${'$'}(monitor_pids)"
-          if [ -n "${'$'}remaining" ]; then
-            log_monitor "cleanup force-kill pids=${'$'}remaining"
-            for stale_pid in ${'$'}remaining; do
-              /system/bin/kill -9 "${'$'}stale_pid" >/dev/null 2>&1
-            done
-            /system/bin/sleep 0.2
-          fi
-          remaining="${'$'}(monitor_pids)"
-          /system/bin/rm -f "${'$'}PID_FILE" "${'$'}STATE_FILE"
-          if [ -n "${'$'}remaining" ]; then
-            log_monitor "cleanup failed remainingPids=${'$'}remaining"
-            return 1
-          fi
-          log_monitor "cleanup complete"
-          return 0
+          /system/bin/rm -f "$PID_FILE" "$STATE_FILE"
+          [ -z "${'$'}remaining" ] || return 1
+          log_monitor 'cleanup complete'
         }
 
         monitor_is_running() {
-          [ -s "${'$'}PID_FILE" ] || return 1
-          monitor_pid="${'$'}(/system/bin/cat "${'$'}PID_FILE" 2>/dev/null)"
-          is_monitor_pid "${'$'}monitor_pid"
-        }
-
-        cleanup_monitor() {
-          children_file="/proc/${'$'}${'$'}/task/${'$'}${'$'}/children"
-          child_pids=
-          [ -r "${'$'}children_file" ] && IFS= read -r child_pids < "${'$'}children_file"
-          for child_pid in ${'$'}child_pids; do
-            kill_tree "${'$'}child_pid"
-          done
-          tracked_pid="${'$'}(/system/bin/cat "${'$'}PID_FILE" 2>/dev/null)"
-          if [ "${'$'}tracked_pid" = "${'$'}${'$'}" ]; then
-            /system/bin/rm -f "${'$'}PID_FILE" "${'$'}STATE_FILE"
-          fi
-        }
-
-        find_input_device() {
-          for candidate in /dev/input/event*; do
-            [ -c "${'$'}candidate" ] || continue
-            if /system/bin/getevent -pl "${'$'}candidate" 2>/dev/null |
-              /system/bin/grep -F 'gpio-keys' >/dev/null 2>&1; then
-              echo "${'$'}candidate"
-              return 0
-            fi
-          done
-          return 1
-        }
-
-        notify_app() {
-          /system/bin/am broadcast --user 0 -f 0x10000000 \
-            -a com.abdulkus.essentialremap.SHELL_KEY_EVENT \
-            -n com.abdulkus.essentialremap/.ShellKeyEventReceiver \
-            --es monitor_status "${'$'}1" >/dev/null 2>&1
-          notify_status=${'$'}?
-          log_monitor "diagnostic-broadcast status=${'$'}notify_status message=${'$'}1"
-        }
-
-        send_event() {
-          /system/bin/am broadcast --user 0 -f 0x10000000 \
-            -a com.abdulkus.essentialremap.SHELL_KEY_EVENT \
-            -n com.abdulkus.essentialremap/.ShellKeyEventReceiver \
-            --ei action "${'$'}1" \
-            --el event_time "${'$'}2" \
-            --el down_time "${'$'}3" \
-            --ei repeat_count "${'$'}4" \
-            --ez interactive "${'$'}5" \
-            --es monitor_status "source=getevent revision=${'$'}MONITOR_REVISION input=${'$'}INPUT_DEVICE state=${'$'}6" \
-            >/dev/null 2>&1
-          send_status=${'$'}?
-          log_monitor "event-broadcast action=${'$'}1 eventTime=${'$'}2 downTime=${'$'}3 interactive=${'$'}5 status=${'$'}send_status"
-        }
-
-        resolve_interactive() {
-          wakefulness="${'$'}(/system/bin/dumpsys power 2>/dev/null | /system/bin/grep -m 1 'mWakefulness=')"
-          case "${'$'}wakefulness" in
-            *Asleep*|*Dozing*) echo false; return 0 ;;
-            *Awake*) echo true; return 0 ;;
-          esac
-          echo unknown
-          return 1
-        }
-
-        event_times_from_getevent() {
-          raw_timestamp="${'$'}1"
-          event_seconds="${'$'}{raw_timestamp%.*}"
-          event_micros="${'$'}{raw_timestamp#*.}"
-          case "${'$'}event_micros" in
-            ??????) ;;
-            ?????) event_micros="${'$'}{event_micros}0" ;;
-            ????) event_micros="${'$'}{event_micros}00" ;;
-            ???) event_micros="${'$'}{event_micros}000" ;;
-            ??) event_micros="${'$'}{event_micros}0000" ;;
-            ?) event_micros="${'$'}{event_micros}00000" ;;
-            *) return 1 ;;
-          esac
-          case "${'$'}event_seconds${'$'}event_micros" in ''|*[!0-9]*) return 1 ;; esac
-          event_millis_fraction="${'$'}{event_micros%???}"
-          echo "${'$'}event_seconds${'$'}event_micros"000 "${'$'}event_seconds${'$'}event_millis_fraction"
-        }
-
-        run_monitor() {
-          trap '' HUP
-          trap cleanup_monitor EXIT
-          trap 'exit 0' INT TERM
-          INPUT_DEVICE="${'$'}(find_input_device)"
-          if [ -z "${'$'}INPUT_DEVICE" ]; then
-            log_monitor "fatal revision=${'$'}MONITOR_REVISION reason=gpio-keys-not-found"
-            notify_app "source=getevent revision=${'$'}MONITOR_REVISION state=gpio-keys-not-found"
-            exit 1
-          fi
-          echo "${'$'}${'$'}" > "${'$'}PID_FILE"
-          echo "revision=${'$'}MONITOR_REVISION pid=${'$'}${'$'} input=${'$'}INPUT_DEVICE" > "${'$'}STATE_FILE"
-          log_monitor "started revision=${'$'}MONITOR_REVISION input=${'$'}INPUT_DEVICE pid=${'$'}${'$'}"
-          active_down_time=
-          /system/bin/getevent -t "${'$'}INPUT_DEVICE" 2>&1 | while IFS= read -r line; do
-            event_payload="${'$'}{line#*] }"
-            case "${'$'}event_payload" in /dev/input/*': '*) event_payload="${'$'}{event_payload#*: }" ;; esac
-            set -- ${'$'}event_payload
-            [ "${'$'}#" -ge 3 ] || continue
-            event_type="${'$'}1"
-            event_code="${'$'}2"
-            event_value="${'$'}3"
-            case "${'$'}event_type:${'$'}event_code" in
-              0001:00fa|0001:00FA|0001:00Fa|0001:00fA) ;;
-              *) continue ;;
-            esac
-            timestamp_part="${'$'}{line#*[}"
-            timestamp_part="${'$'}{timestamp_part%%]*}"
-            set -- ${'$'}timestamp_part
-            [ "${'$'}#" -ge 1 ] || continue
-            event_times="${'$'}(event_times_from_getevent "${'$'}1")" || continue
-            set -- ${'$'}event_times
-            [ "${'$'}#" -eq 2 ] || continue
-            event_time="${'$'}1"
-            event_time_ms="${'$'}2"
-            log_monitor "raw input=${'$'}INPUT_DEVICE type=${'$'}event_type code=${'$'}event_code value=${'$'}event_value eventTime=${'$'}event_time eventTimeMs=${'$'}event_time_ms"
-            case "${'$'}event_value" in
-              00000001)
-                interactive="${'$'}(resolve_interactive)"
-                case "${'$'}interactive" in
-                  false)
-                    active_down_time="${'$'}event_time"
-                    send_event 0 "${'$'}event_time" "${'$'}event_time" 0 false screen-off
-                    ;;
-                  true)
-                    active_down_time=
-                    notify_app "source=getevent revision=${'$'}MONITOR_REVISION input=${'$'}INPUT_DEVICE state=screen-on"
-                    ;;
-                  *)
-                    active_down_time=
-                    notify_app "source=getevent revision=${'$'}MONITOR_REVISION input=${'$'}INPUT_DEVICE state=unresolved"
-                    ;;
-                esac
-                ;;
-              00000000)
-                [ -n "${'$'}active_down_time" ] || continue
-                send_event 1 "${'$'}event_time" "${'$'}active_down_time" 0 false screen-off-release
-                active_down_time=
-                ;;
-              00000002)
-                log_monitor "repeat ignored input=${'$'}INPUT_DEVICE eventTime=${'$'}event_time"
-                ;;
-            esac
-          done
-          monitor_status=${'$'}?
-          log_monitor "getevent-exited input=${'$'}INPUT_DEVICE status=${'$'}monitor_status"
-          exit "${'$'}monitor_status"
+          [ -s "$PID_FILE" ] && [ -s "$STATE_FILE" ] || return 1
+          monitor_pid="${'$'}(/system/bin/cat "$PID_FILE" 2>/dev/null)"
+          is_monitor_pid "${'$'}monitor_pid" || return 1
+          monitor_state="${'$'}(/system/bin/cat "$STATE_FILE" 2>/dev/null)"
+          case "${'$'}monitor_state" in "revision=${'$'}MONITOR_REVISION pid=${'$'}monitor_pid "*) ;; *) return 1 ;; esac
+          # The helper process alone is insufficient: verify its actual getevent child too.
+          /system/bin/ps -A -o PPID,ARGS 2>/dev/null |
+            /system/bin/grep -E "^[[:space:]]*${'$'}monitor_pid[[:space:]]+.*getevent -t /dev/input/event[0-9]+" >/dev/null
         }
 
         case "${'$'}1" in
           start)
-            /system/bin/mkdir -p "${'$'}DIR"
-            : > "${'$'}LOG_FILE"
-            log_monitor "start entered revision=${'$'}MONITOR_REVISION pid=${'$'}${'$'}"
-            if ! stop_all_monitors; then
-              echo essential-remap:shell-monitor-cleanup-failed
-              /system/bin/tail -n 30 "${'$'}LOG_FILE" 2>/dev/null
-              exit 1
-            fi
-            if command -v nohup >/dev/null 2>&1; then
-              if command -v setsid >/dev/null 2>&1; then
-                /system/bin/nohup setsid /system/bin/sh "${'$'}SCRIPT" run </dev/null >/dev/null 2>&1 &
-              else
-                /system/bin/nohup /system/bin/sh "${'$'}SCRIPT" run </dev/null >/dev/null 2>&1 &
-              fi
+            acquire_lock || exit 1
+            stop_all_monitors || { echo essential-remap:shell-monitor-cleanup-failed; exit 1; }
+            apk_path="${'$'}(/system/bin/pm path --user 0 com.abdulkus.essentialremap | /system/bin/head -n 1)"
+            apk_path="${'$'}{apk_path#package:}"
+            [ -r "${'$'}apk_path" ] || { echo essential-remap:monitor-apk-unreadable; exit 1; }
+            # Local copy only; no APK is streamed through Wireless ADB. The running dex stays immutable.
+            /system/bin/rm -f "${'$'}HELPER_APK.new"
+            /system/bin/cp "${'$'}apk_path" "${'$'}HELPER_APK.new" &&
+              /system/bin/chmod 400 "${'$'}HELPER_APK.new" &&
+              /system/bin/mv -f "${'$'}HELPER_APK.new" "${'$'}HELPER_APK" || exit 1
+            /system/bin/rm -f "${'$'}DIR/stop-requested"
+            if command -v setsid >/dev/null 2>&1; then
+              /system/bin/nohup setsid /system/bin/sh "$SCRIPT" run </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             else
-              /system/bin/sh "${'$'}SCRIPT" run </dev/null >/dev/null 2>&1 &
+              /system/bin/nohup /system/bin/sh "$SCRIPT" run </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             fi
             wait_count=0
-            while [ "${'$'}wait_count" -lt 30 ]; do
-              if monitor_is_running && [ -s "${'$'}STATE_FILE" ]; then
-                monitor_state="${'$'}(/system/bin/cat "${'$'}STATE_FILE" 2>/dev/null)"
-                case "${'$'}monitor_state" in
-                  "revision=${'$'}MONITOR_REVISION "*)
-                    log_monitor "start confirmed ${'$'}monitor_state"
-                    echo "$START_CONFIRMATION ${'$'}{monitor_state#revision=${'$'}MONITOR_REVISION }"
-                    exit 0
-                    ;;
-                esac
-              fi
+            while [ "${'$'}wait_count" -lt 60 ]; do
+              if monitor_is_running; then echo "$START_CONFIRMATION ${'$'}monitor_state"; exit 0; fi
               /system/bin/sleep 0.1
               wait_count=${'$'}((wait_count + 1))
             done
             echo essential-remap:shell-monitor-failed
-            /system/bin/tail -n 30 "${'$'}LOG_FILE" 2>/dev/null
+            /system/bin/tail -n 30 "${'$'}DIR/helper-start.log" "$LOG_FILE" 2>/dev/null
             stop_all_monitors
             exit 1
+            ;;
+          run)
+            trap '' HUP
+            app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap | /system/bin/grep -E '^package:com[.]abdulkus[.]essentialremap uid:[0-9]+$')"
+            app_uid="${'$'}{app_info##*uid:}"
+            case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
+            export CLASSPATH="${'$'}HELPER_APK"
+            trap 'exit 0' INT TERM
+            restarts=0
+            while [ "${'$'}restarts" -lt 3 ] && [ ! -e "${'$'}DIR/stop-requested" ]; do
+              /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
+                com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR" &
+              helper_pid=${'$'}!
+              wait "${'$'}helper_pid"
+              [ -e "${'$'}DIR/stop-requested" ] && break
+              restarts=${'$'}((restarts + 1))
+              log_monitor "helper exited; recovery=${'$'}restarts/3"
+              [ "${'$'}restarts" -lt 3 ] && /system/bin/sleep "${'$'}restarts"
+            done
             ;;
           stop)
-            stop_all_monitors
-            stop_status=${'$'}?
-            if [ "${'$'}stop_status" -eq 0 ]; then echo $STOP_OK; else echo essential-remap:shell-monitor-stop-failed; fi
-            exit "${'$'}stop_status"
+            acquire_lock || exit 1
+            stop_all_monitors || exit 1
+            echo "$STOP_OK"
             ;;
           status)
-            if monitor_is_running && [ -s "${'$'}STATE_FILE" ]; then
-              monitor_state="${'$'}(/system/bin/cat "${'$'}STATE_FILE" 2>/dev/null)"
-              case "${'$'}monitor_state" in
-                "revision=${'$'}MONITOR_REVISION "*)
-                  echo "$RUNNING_CONFIRMATION ${'$'}{monitor_state#revision=${'$'}MONITOR_REVISION } count=1"
-                  exit 0
-                  ;;
-              esac
+            if monitor_is_running; then
+              echo "$RUNNING_CONFIRMATION ${'$'}monitor_state"
+              exit 0
             fi
             echo "essential-remap:shell-monitor-not-running revision=${'$'}MONITOR_REVISION"
+            /system/bin/tail -n 10 "${'$'}DIR/helper-start.log" "$LOG_FILE" 2>/dev/null
             exit 1
             ;;
-          run) run_monitor ;;
           *) exit 2 ;;
         esac
     """.trimIndent() + "\n"

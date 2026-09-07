@@ -613,6 +613,7 @@ private fun SleepSetupStep(
             contentPadding = PaddingValues(vertical = 14.dp),
         ) { Text(language.t("INSTALL SLEEP MONITOR", "УСТАНОВИТЬ МОНИТОР СНА"), textAlign = TextAlign.Center) }
     }
+    BatteryAccessCard(language)
     ManualCommands(language, copyText, includeSleepMonitor = true)
 }
 
@@ -1371,6 +1372,7 @@ private fun SettingsDialog(
                             ),
                         )
                     }
+                    if (screenOffEnabled) BatteryAccessCard(language)
                     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR) {
                         SetupProgress(
                             language,
@@ -1708,4 +1710,29 @@ private fun setupPhaseTitle(language: AppLanguage, phase: SetupPhase): String = 
     SetupPhase.APPLYING -> language.t("Applying package state", "Применение настроек пакетов")
     SetupPhase.COMPLETE -> language.t("Setup complete", "Настройка завершена")
     SetupPhase.ERROR -> language.t("Setup failed", "Ошибка настройки")
+}
+
+@Composable
+private fun BatteryAccessCard(language: AppLanguage) {
+    val context = LocalContext.current
+    val power = context.getSystemService(android.os.PowerManager::class.java)
+    if (!power.isIgnoringBatteryOptimizations(context.packageName)) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                language.t(
+                    "For reliable presses during deep sleep, allow unrestricted battery use. The monitor still sleeps while idle.",
+                    "Для работы кнопки в глубоком сне разрешите расход батареи без ограничений. В простое монитор продолжит спать.",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedButton(onClick = {
+                runCatching {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }.onFailure {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:${context.packageName}")))
+                }
+            }) { Text(language.t("BATTERY SETTINGS", "НАСТРОЙКИ БАТАРЕИ")) }
+        }
+    }
 }

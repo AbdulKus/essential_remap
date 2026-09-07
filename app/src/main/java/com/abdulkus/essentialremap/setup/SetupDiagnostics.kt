@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Process
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
+import com.abdulkus.essentialremap.EssentialKeyApplication
+import android.os.PowerManager
 import java.io.File
 import java.time.Instant
 
@@ -38,6 +40,9 @@ class SetupDiagnostics(context: Context) {
                 appendLine("Process: ${Process.myPid()}")
                 appendLine("Nothing packages: ${NothingPackageStatusReader(appContext).read()}")
                 appendLine("Screen-off marker: ${ScreenOffKeyAccess.isGranted(appContext)}")
+                val power = appContext.getSystemService(PowerManager::class.java)
+                appendLine("Power: interactive=${power.isInteractive} deviceIdle=${power.isDeviceIdleMode} batteryExempt=${power.isIgnoringBatteryOptimizations(appContext.packageName)}")
+                appendLine("Bridge: ${(appContext as? EssentialKeyApplication)?.container?.shellBridge?.report()}")
                 appendLine("ADB install service: ${ShellKeyMonitorCommands.INSTALL_SERVICE}")
                 appendLine("Expected monitor: ${ShellKeyMonitorCommands.RUNNING_CONFIRMATION}")
                 appendLine("Stored log bytes: ${file.takeIf(File::exists)?.length() ?: 0}")

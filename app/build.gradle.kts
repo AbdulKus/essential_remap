@@ -12,8 +12,8 @@ android {
         applicationId = "com.abdulkus.essentialremap"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "0.1.27"
+        versionCode = 29
+        versionName = "0.1.28"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -65,6 +65,8 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.05.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     implementation("androidx.activity:activity-compose:1.12.3")
     implementation("androidx.compose.foundation:foundation")
