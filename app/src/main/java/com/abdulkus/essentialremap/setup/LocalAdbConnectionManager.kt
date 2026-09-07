@@ -25,7 +25,6 @@ import javax.crypto.spec.GCMParameterSpec
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 
 class LocalAdbConnectionManager(context: Context) : AbsAdbConnectionManager() {
@@ -77,9 +76,12 @@ internal class EncryptedAdbIdentityStore(private val context: Context) {
         val now = Date()
         val expires = Date(now.time + TWENTY_YEARS_MS)
         val subject = X500Name("CN=Essential Remap")
-        val provider = BouncyCastleProvider()
+
+        // Do not force Bouncy Castle as the JCA provider here. Release builds are minified,
+        // and provider implementations registered dynamically by BC can be removed by R8.
+        // Android's platform provider/Conscrypt exposes SHA256withRSA and works with this
+        // exportable RSA key, while Bouncy Castle is still used for the certificate builder.
         val signer = JcaContentSignerBuilder("SHA256withRSA")
-            .setProvider(provider)
             .build(keyPair.private)
         val holder = JcaX509v3CertificateBuilder(
             subject,
@@ -90,7 +92,6 @@ internal class EncryptedAdbIdentityStore(private val context: Context) {
             keyPair.public,
         ).build(signer)
         val certificate = JcaX509CertificateConverter()
-            .setProvider(provider)
             .getCertificate(holder)
         certificate.verify(keyPair.public)
         return AdbIdentity(keyPair.private, certificate)
