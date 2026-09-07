@@ -101,6 +101,7 @@ public final class ShellMonitorMain {
                 emit("READY", 0, 0);
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;
+                    boolean desynchronized = false;
                     while ((line = reader.readLine()) != null) {
                         if (line.contains("Can't enable monotonic clock")) {
                             throw new IllegalStateException("Input monotonic clock unavailable");
@@ -109,9 +110,15 @@ public final class ShellMonitorMain {
                         if (!event.find()) continue;
                         int type = Integer.parseInt(event.group(3), 16);
                         int code = Integer.parseInt(event.group(4), 16);
+                        if (desynchronized) {
+                            if (type == 0 && code == 0) desynchronized = false;
+                            continue;
+                        }
                         if (type == 0 && code == 3) { // SYN_DROPPED: do not execute a partial gesture.
+                            desynchronized = true;
                             classifier.reset();
                             emit("RESET", 0, 0);
+                            continue;
                         }
                         if (type != 1 || code != 250) continue;
                         long ns = Long.parseLong(event.group(1)) * 1_000_000_000L + Long.parseLong(event.group(2)) * 1_000L;

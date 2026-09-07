@@ -35,6 +35,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     private data class Pending(val message: MonitorMessage, val interactive: Boolean)
     private val pending = ArrayDeque<Pending>()
     private val seen = LinkedHashMap<String, Long>()
+    private var activeSession: String? = null
     private val handoff = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.abdulkus.essentialremap:input-handoff")
         .apply { setReferenceCounted(false) }
 
@@ -84,7 +85,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                             socket = null
                             writer = null
                             ScreenOffKeyAccess.setRuntimeHealthy(false)
-                            handler.post { resetDelivery() }
+                            // A transport reconnect is not an input reset. Keep fresh pending DOWNs.
                         }
                     }
                 }
@@ -114,8 +115,20 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
             val previous = seen[message.session] ?: 0L
             if (message.number <= previous) {
                 diagnostics.log("Bridge: duplicate ignored session=${message.session.take(8)} number=${message.number}")
+                if (pending.isEmpty()) releaseHandoff()
                 return@post
             }
+            if (activeSession != null && activeSession != message.session) {
+                if (seen.containsKey(message.session) || (message.kind != "READY" && message.kind != "DOWN")) {
+                    diagnostics.log("Bridge: retired or uninitialized session ignored")
+                    if (pending.isEmpty()) releaseHandoff()
+                    return@post
+                }
+                resetDelivery()
+                listener?.invoke(MonitorMessage(message.session, message.number, "RESET", 0, 0,
+                    message.emittedElapsedMs), interactive)
+            }
+            activeSession = message.session
             seen[message.session] = message.number
             while (seen.size > 4) seen.remove(seen.keys.first())
             lastReport = "transport=$transport session=${message.session.take(8)} number=${message.number} " +

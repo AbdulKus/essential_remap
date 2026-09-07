@@ -28,14 +28,33 @@ public final class SocketProbeMain {
                 send(out, in, new MonitorMessage(session, 1, "READY", 0, 0, SystemClock.elapsedRealtime()));
                 long down = SystemClock.uptimeMillis() * 1_000_000L;
                 send(out, in, new MonitorMessage(session, 2, "DOWN", down, down, SystemClock.elapsedRealtime()));
-                SystemClock.sleep(60);
-                MonitorMessage tap = new MonitorMessage(session, 3, "SINGLE", down,
-                    SystemClock.uptimeMillis() * 1_000_000L, SystemClock.elapsedRealtime());
+                long actionNumber = 3;
+                if (args.length > 1 && args[1].equals("reconnect")) {
+                    peer.close();
+                    peer = server.accept();
+                    if (peer.getPeerCredentials().getUid() != Integer.parseInt(args[0])) throw new AssertionError("unexpected reconnect UID");
+                    peer.setSoTimeout(3000);
+                    out = new PrintWriter(new OutputStreamWriter(peer.getOutputStream(), StandardCharsets.UTF_8), true);
+                    in = new BufferedReader(new InputStreamReader(peer.getInputStream(), StandardCharsets.UTF_8));
+                    send(out, in, new MonitorMessage(session, 3, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                    actionNumber = 4;
+                } else {
+                    SystemClock.sleep(60);
+                }
+                MonitorMessage tap = new MonitorMessage(session, actionNumber, "SINGLE", down,
+                    down + 60_000_000L, SystemClock.elapsedRealtime());
                 send(out, in, tap);
                 send(out, in, tap); // Lost ACK/retry must not duplicate execution.
                 peer.setSoTimeout(600);
-                try { if (in.readLine() != null) throw new AssertionError("unexpected idle traffic"); }
-                catch (SocketTimeoutException expected) { }
+                try {
+                    String request = in.readLine();
+                    if ("PING".equals(request) && args.length > 1 && args[1].equals("reconnect")) {
+                        send(out, in, new MonitorMessage(session, actionNumber + 1, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                        if (in.readLine() != null) throw new AssertionError("unexpected idle traffic");
+                    } else if (request != null) {
+                        throw new AssertionError("unexpected idle traffic " + request);
+                    }
+                } catch (SocketTimeoutException expected) { }
                 System.out.println("PROBE_OK");
             } finally { peer.close(); }
         } finally { server.close(); }

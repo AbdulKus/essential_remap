@@ -16,7 +16,12 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ShellMonitorTransportTest {
     @Test
-    fun shellSocketAcknowledgesInputDeduplicatesRetriesAndStaysIdle() {
+    fun shellSocketAcknowledgesInputDeduplicatesRetriesAndStaysIdle() = runProbe(false)
+
+    @Test
+    fun freshPendingDownSurvivesTransportReconnectBeforeServiceAttaches() = runProbe(true)
+
+    private fun runProbe(reconnect: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val app = context.applicationContext as EssentialKeyApplication
@@ -24,18 +29,22 @@ class ShellMonitorTransportTest {
         val received = Collections.synchronizedList(mutableListOf<String>())
         val delivered = CountDownLatch(1)
         val listener: (MonitorMessage, Boolean) -> Unit = { message, _ ->
-            received.add(message.kind)
+            if (message.kind != "RESET") received.add(message.kind)
             if (message.isGesture) delivered.countDown()
         }
-        fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
         val classpath = context.applicationInfo.sourceDir + ":" + instrumentation.context.applicationInfo.sourceDir
         val shell = instrumentation.uiAutomation.executeShellCommand(
-            "CLASSPATH=${quote(classpath)} /system/bin/app_process /system/bin " +
-                "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid}",
+            "/system/bin/env CLASSPATH=$classpath /system/bin/app_process /system/bin " +
+                "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid} ${if (reconnect) "reconnect" else "normal"}",
         )
         try {
+            if (reconnect) {
+                app.container.shellBridge.requestConnect()
+                Thread.sleep(1_100) // Simulate loading service settings across the transport failure.
+            }
             instrumentation.runOnMainSync { app.container.shellBridge.attach(listener) }
-            assertTrue("No gesture arrived through the shell socket", delivered.await(10, TimeUnit.SECONDS))
+            assertTrue("No gesture arrived through the shell socket\n${app.container.diagnostics.report()}",
+                delivered.await(10, TimeUnit.SECONDS))
             val result = FileInputStream(shell.fileDescriptor).bufferedReader().use { it.readText() }
             instrumentation.waitForIdleSync()
             assertTrue(result, result.contains("PROBE_OK"))
