@@ -40,17 +40,22 @@ class ShellMonitorTransportTest {
         fun command(text: String): String = instrumentation.uiAutomation.executeShellCommand(text).use {
             FileInputStream(it.fileDescriptor).bufferedReader().use { reader -> reader.readText() }
         }
+        val deepWasEnabled = if (idle) command("/system/bin/cmd deviceidle enabled deep").trim() else "1"
+        var idleResult = ""
         if (idle) {
             command("/system/bin/dumpsys battery unplug")
             command("/system/bin/input keyevent 223")
-            command("/system/bin/cmd deviceidle force-idle")
+            command("/system/bin/cmd deviceidle enable deep")
+            idleResult = command("/system/bin/cmd deviceidle force-idle deep")
         }
         val shell = instrumentation.uiAutomation.executeShellCommandRwe(
             "/system/bin/env CLASSPATH=$classpath /system/bin/app_process /system/bin " +
                 "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid} ${if (reconnect) "reconnect" else "normal"}",
         )
+        shell[1].close() // No stdin is needed; don't keep UiAutomation's input pump alive.
         val output = StringBuffer()
         val ready = CountDownLatch(1)
+        val reconnected = CountDownLatch(1)
         val finished = CountDownLatch(1)
         thread(isDaemon = true, name = "probe-stdout") {
             try {
@@ -58,6 +63,7 @@ class ShellMonitorTransportTest {
                     lines.forEach { line ->
                         output.append(line).append('\n')
                         if (line == "PROBE_READY") ready.countDown()
+                        if (line == "PROBE_RECONNECTED") reconnected.countDown()
                     }
                 }
             } catch (_: java.io.IOException) {
@@ -74,14 +80,18 @@ class ShellMonitorTransportTest {
         try {
             if (idle) {
                 val power = context.getSystemService(android.os.PowerManager::class.java)
+                repeat(40) { if (!power.isDeviceIdleMode) Thread.sleep(50) }
                 assertTrue("Display must be off for the idle test", !power.isInteractive)
-                assertTrue("Device must be in Doze for the idle test", power.isDeviceIdleMode)
+                assertTrue("Device must be in Doze for the idle test: $idleResult; " +
+                    command("/system/bin/cmd deviceidle get deep"), power.isDeviceIdleMode)
             }
             val started = ready.await(10, TimeUnit.SECONDS)
             assertTrue("Shell probe did not start: $output", started)
             if (reconnect) {
                 app.container.shellBridge.requestConnect()
-                Thread.sleep(1_100) // Simulate loading service settings across the transport failure.
+                val recovered = reconnected.await(10, TimeUnit.SECONDS)
+                assertTrue("Shell probe did not reconnect: $output", recovered)
+                instrumentation.waitForIdleSync() // DOWN has been queued while no listener was attached.
             }
             instrumentation.runOnMainSync { app.container.shellBridge.attach(listener) }
             val arrived = delivered.await(10, TimeUnit.SECONDS)
@@ -96,6 +106,7 @@ class ShellMonitorTransportTest {
             shell.forEach { runCatching { it.close() } }
             if (idle) {
                 command("/system/bin/cmd deviceidle unforce")
+                if (deepWasEnabled == "0") command("/system/bin/cmd deviceidle disable deep")
                 command("/system/bin/dumpsys battery reset")
                 command("/system/bin/input keyevent 224")
             }

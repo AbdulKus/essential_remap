@@ -42,6 +42,9 @@ class KeyAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var actionExecutor: ActionExecutor
     private var gestureSequenceActive = false
+    private var gestureFirstDownNs = 0L
+    private var gestureLastDownNs = 0L
+    private val actionGate = GestureActionGate()
     private var gestureStartedWhileLocked = false
     private var gestureStartedScreenOff = false
     private var activeWakeLock: PowerManager.WakeLock? = null
@@ -175,11 +178,17 @@ class KeyAccessibilityService : AccessibilityService() {
         val startedWhileLocked = gestureStartedWhileLocked
         val startedScreenOff = gestureStartedScreenOff
         val wakeLock = activeWakeLock
+        val mayDispatch = actionGate.claim(gestureFirstDownNs, gestureLastDownNs)
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
         gestureStartedScreenOff = false
         activeWakeLock = null
 
+        if (!mayDispatch) {
+            releaseWakeLock(wakeLock)
+            trace("duplicate physical gesture discarded after transport handover")
+            return
+        }
         dispatchAction(action, startedWhileLocked, startedScreenOff, wakeLock)
     }
 
@@ -283,6 +292,11 @@ class KeyAccessibilityService : AccessibilityService() {
         }
         val lock = shellWakeLock
         shellWakeLock = null
+        if (!actionGate.claim(message.downNs, shellPhysicalDownNs)) {
+            releaseWakeLock(lock)
+            trace("source duplicate discarded: Accessibility already handled the physical press")
+            return
+        }
         trace("source gesture: press=$action physicalDown=${message.downNs} physicalEvent=${message.eventNs}")
         dispatchAction(action, shellStartedLocked, true, lock)
     }
@@ -315,7 +329,11 @@ class KeyAccessibilityService : AccessibilityService() {
             trace("key down ignored: completed duplicate without active gesture")
             return
         }
-        if (!gestureSequenceActive) gestureSequenceActive = true
+        if (!gestureSequenceActive) {
+            gestureSequenceActive = true
+            gestureFirstDownNs = downTimeNanos
+        }
+        if (gateResult == PhysicalKeyEventGate.DownResult.NEW) gestureLastDownNs = downTimeNanos
         gestureStartedScreenOff = gestureStartedScreenOff || startedScreenOff
         gestureStartedWhileLocked = gestureStartedWhileLocked ||
             startedScreenOff || keyguardManager.isKeyguardLocked

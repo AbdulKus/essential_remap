@@ -49,6 +49,8 @@ public final class SocketProbeMain {
                     out = channel.output;
                     in = channel.input;
                     send(out, in, new MonitorMessage(session, 4, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                    System.out.println("PROBE_RECONNECTED");
+                    System.out.flush();
                     actionNumber = 5;
                 } else {
                     SystemClock.sleep(60);
@@ -70,6 +72,7 @@ public final class SocketProbeMain {
                 System.out.println("PROBE_OK");
             } finally { peer.close(); }
         } finally { server.close(); }
+        System.exit(0); // app_process may retain framework threads after main returns.
     }
     private static void send(PrintWriter out, BufferedReader in, MonitorMessage message) throws Exception {
         out.println(message.encode());
