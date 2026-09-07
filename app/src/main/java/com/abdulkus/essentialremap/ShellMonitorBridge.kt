@@ -78,7 +78,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                             }
                         }
                     } catch (error: Exception) {
-                        diagnostics.log("Bridge: connection attempt=${attempt + 1} ${error.javaClass.simpleName}")
+                        diagnostics.log("Bridge: connection attempt=${attempt + 1} ${error.javaClass.simpleName}: ${error.message}")
                     } finally {
                         runCatching { candidate.close() }
                         if (socket === candidate) {

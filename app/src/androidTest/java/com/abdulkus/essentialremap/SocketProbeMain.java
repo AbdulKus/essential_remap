@@ -17,6 +17,8 @@ public final class SocketProbeMain {
     public static void main(String[] args) throws Exception {
         if (android.os.Process.myUid() != 2000) throw new AssertionError("probe is not shell");
         LocalServerSocket server = new LocalServerSocket(MonitorMessage.SOCKET);
+        System.out.println("PROBE_READY");
+        System.out.flush();
         try {
             LocalSocket peer = server.accept();
             try {

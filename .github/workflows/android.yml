@@ -157,7 +157,7 @@ jobs:
             adb install "essential-remap-${APP_VERSION}-androidTest.apk"
             adb shell am instrument -w -e class com.abdulkus.essentialremap.ShellMonitorTransportTest com.abdulkus.essentialremap.test/androidx.test.runner.AndroidJUnitRunner > transport-result.txt
             cat transport-result.txt
-            adb logcat -d -t 2000 > transport-logcat.txt
+            adb logcat -d > transport-logcat.txt
             adb shell run-as com.abdulkus.essentialremap cat files/essential_key_setup.log > transport-app-log.txt
             cat transport-app-log.txt
             grep -q 'OK (2 tests)' transport-result.txt
