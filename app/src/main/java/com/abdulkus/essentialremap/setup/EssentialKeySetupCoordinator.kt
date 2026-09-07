@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import com.abdulkus.essentialremap.MainActivity
+import com.abdulkus.essentialremap.EssentialKeyApplication
 import com.abdulkus.essentialremap.R
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import com.abdulkus.essentialremap.ui.AppLanguage
@@ -96,9 +97,15 @@ class EssentialKeySetupCoordinator(
     init {
         createNotificationChannel()
         diagnostics.log("Coordinator created; packageStatus=${_state.value.packageStatus}")
+        scope.launch {
+            ScreenOffKeyAccess.changes.collect {
+                _state.value = _state.value.copy(screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext))
+            }
+        }
     }
 
     override fun refresh() {
+        (appContext as? EssentialKeyApplication)?.container?.shellBridge?.requestConnect()
         _state.value = _state.value.copy(
             packageStatus = statusReader.read(),
             screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
@@ -329,6 +336,11 @@ class EssentialKeySetupCoordinator(
             val screenOffAccessGranted = when (operation) {
                 PackageOperation.INSTALL_SLEEP_MONITOR -> {
                     verifyScreenOffAccess(connectedManager)
+                    val bridge = (appContext as EssentialKeyApplication).container.shellBridge
+                    bridge.requestConnect()
+                    withTimeout(4_000) {
+                        while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
+                    }
                     ScreenOffKeyAccess.markStarted(appContext)
                     SleepMonitorBootReceiver.cancelReminder(appContext)
                     true
