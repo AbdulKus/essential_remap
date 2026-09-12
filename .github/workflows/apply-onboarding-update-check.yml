@@ -25,7 +25,9 @@ jobs:
 
       - name: Patch onboarding update flow
         shell: bash
-        run: python3 /tmp/apply_onboarding_update.py
+        run: |
+          python3 /tmp/apply_onboarding_update.py
+          git checkout origin/main -- .github/workflows/android.yml
 
       - name: Verify changes
         shell: bash
@@ -34,9 +36,8 @@ jobs:
           grep -q 'updateState = updateState' app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt
           grep -q 'versionCode = 30' app/build.gradle.kts
           grep -q 'versionName = "0.1.30"' app/build.gradle.kts
-          grep -q 'APP_VERSION: 0.1.30' .github/workflows/android.yml
           git diff --check
-          git diff -- app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt app/build.gradle.kts .github/workflows/android.yml
+          git diff -- app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt app/build.gradle.kts
 
       - name: Commit to main
         shell: bash
@@ -45,7 +46,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt \
                   app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt \
-                  app/build.gradle.kts \
-                  .github/workflows/android.yml
-          git commit -m 'Add update check to onboarding and release 0.1.30'
+                  app/build.gradle.kts
+          git commit -m 'Add update check to onboarding and bump app to 0.1.30'
           git push origin HEAD:main
