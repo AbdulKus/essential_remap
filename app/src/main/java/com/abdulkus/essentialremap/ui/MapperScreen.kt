@@ -90,6 +90,9 @@ import com.abdulkus.essentialremap.setup.NothingPackageStatus
 import com.abdulkus.essentialremap.setup.PackageOperation
 import com.abdulkus.essentialremap.setup.SetupPhase
 import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
+import com.abdulkus.essentialremap.update.DownloadedUpdate
+import com.abdulkus.essentialremap.update.GitHubRelease
+import com.abdulkus.essentialremap.update.UpdatePromptState
 
 @Composable
 fun EssentialRemapApp(
@@ -102,7 +105,11 @@ fun EssentialRemapApp(
     openAssistantSettings: () -> Unit,
     openAppInfo: () -> Unit,
     openDonate: () -> Unit,
+    updateState: UpdatePromptState,
     checkForUpdates: () -> Unit,
+    downloadUpdate: (GitHubRelease) -> Unit,
+    installUpdate: (DownloadedUpdate) -> Unit,
+    dismissUpdate: () -> Unit,
     openSetupVideo: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
     copyText: (String) -> Unit,
@@ -139,6 +146,11 @@ fun EssentialRemapApp(
             screenOffEnabled = screenOffEnabled,
             setScreenOffEnabled = setScreenOffEnabled,
             openSetupVideo = openSetupVideo,
+            updateState = updateState,
+            checkForUpdates = checkForUpdates,
+            downloadUpdate = downloadUpdate,
+            installUpdate = installUpdate,
+            dismissUpdate = dismissUpdate,
             openAccessibilitySettings = openAccessibilitySettings,
             openDeveloperOptions = openDeveloperOptions,
             beginPackageSetup = beginPackageSetup,
@@ -300,6 +312,11 @@ private fun OnboardingScreen(
     screenOffEnabled: Boolean,
     setScreenOffEnabled: (Boolean) -> Unit,
     openSetupVideo: () -> Unit,
+    updateState: UpdatePromptState,
+    checkForUpdates: () -> Unit,
+    downloadUpdate: (GitHubRelease) -> Unit,
+    installUpdate: (DownloadedUpdate) -> Unit,
+    dismissUpdate: () -> Unit,
     openAccessibilitySettings: () -> Unit,
     openDeveloperOptions: () -> Unit,
     beginPackageSetup: (PackageOperation) -> Unit,
@@ -315,7 +332,7 @@ private fun OnboardingScreen(
     val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
     val screenOffReady = state.setup.screenOffAccessGranted
     val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
-    val pageCount = if (screenOffEnabled) 5 else 4
+    val pageCount = if (screenOffEnabled) 6 else 5
     if (page >= pageCount) page = pageCount - 1
 
     Scaffold { padding ->
@@ -340,8 +357,16 @@ private fun OnboardingScreen(
             }
             Spacer(Modifier.height(36.dp))
             when {
-                page == 0 -> ModeChoiceStep(language, screenOffEnabled, setScreenOffEnabled, openSetupVideo)
-                page == 1 -> BaseSetupStep(
+                page == 0 -> UpdateCheckStep(
+                    language,
+                    updateState,
+                    checkForUpdates,
+                    downloadUpdate,
+                    installUpdate,
+                    dismissUpdate,
+                )
+                page == 1 -> ModeChoiceStep(language, screenOffEnabled, setScreenOffEnabled, openSetupVideo)
+                page == 2 -> BaseSetupStep(
                     language,
                     state,
                     pairingCode,
@@ -354,8 +379,8 @@ private fun OnboardingScreen(
                     copyDiagnostics,
                     clearDiagnostics,
                 )
-                page == 2 -> AccessibilityStep(language, state, openAccessibilitySettings)
-                screenOffEnabled && page == 3 -> SleepSetupStep(
+                page == 3 -> AccessibilityStep(language, state, openAccessibilitySettings)
+                screenOffEnabled && page == 4 -> SleepSetupStep(
                     language,
                     state,
                     pairingCode,
@@ -381,9 +406,10 @@ private fun OnboardingScreen(
                     onClick = { if (page == pageCount - 1) finish() else page++ },
                     enabled = when {
                         page == 0 -> true
-                        page == 1 -> keyReleased
-                        page == 2 -> serviceReady
-                        screenOffEnabled && page == 3 -> screenOffReady
+                        page == 1 -> true
+                        page == 2 -> keyReleased
+                        page == 3 -> serviceReady
+                        screenOffEnabled && page == 4 -> screenOffReady
                         else -> true
                     },
                     modifier = Modifier.weight(1f),
@@ -397,6 +423,140 @@ private fun OnboardingScreen(
 }
 
 @Composable
+private fun UpdateCheckStep(
+    language: AppLanguage,
+    updateState: UpdatePromptState,
+    checkForUpdates: () -> Unit,
+    downloadUpdate: (GitHubRelease) -> Unit,
+    installUpdate: (DownloadedUpdate) -> Unit,
+    dismissUpdate: () -> Unit,
+) {
+    LaunchedEffect(Unit) { checkForUpdates() }
+    StepHeading(
+        "00",
+        language.t("Check for updates", "Проверьте обновления"),
+        language.t(
+            "Before setup, make sure you are using the latest Essential Remap. You can continue without updating if needed.",
+            "Перед настройкой убедитесь, что установлена последняя версия Essential Remap. При необходимости можно продолжить без обновления.",
+        ),
+    )
+    Spacer(Modifier.height(22.dp))
+    when (updateState) {
+        UpdatePromptState.Checking -> {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text(language.t("Checking for updates", "Проверяем обновления"), fontWeight = FontWeight.SemiBold)
+                        Text(
+                            language.t("Looking at the latest GitHub release…", "Проверяем последний релиз на GitHub…"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+        UpdatePromptState.None -> {
+            StatusCard(
+                true,
+                language.t("Latest version installed", "Установлена последняя версия"),
+                language.t("You can continue with setup.", "Можно продолжать настройку."),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = checkForUpdates, modifier = Modifier.fillMaxWidth()) {
+                Text(language.t("CHECK AGAIN", "ПРОВЕРИТЬ ЕЩЁ РАЗ"))
+            }
+        }
+        UpdatePromptState.Dismissed -> {
+            StatusCard(
+                true,
+                language.t("Update skipped", "Обновление пропущено"),
+                language.t("You can continue with setup and update later from Settings.", "Можно продолжить настройку и обновиться позже из настроек."),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onClick = checkForUpdates, modifier = Modifier.fillMaxWidth()) {
+                Text(language.t("CHECK AGAIN", "ПРОВЕРИТЬ ЕЩЁ РАЗ"))
+            }
+        }
+        is UpdatePromptState.Available -> {
+            val release = updateState.release
+            WarningCard(
+                text = language.t(
+                    "Update ${release.version} is available",
+                    "Доступно обновление ${release.version}",
+                ),
+                detail = release.title,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { downloadUpdate(release) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 14.dp),
+            ) {
+                Text(language.t("DOWNLOAD UPDATE", "СКАЧАТЬ ОБНОВЛЕНИЕ"))
+            }
+            TextButton(onClick = dismissUpdate, modifier = Modifier.fillMaxWidth()) {
+                Text(language.t("CONTINUE WITHOUT UPDATE", "ПРОДОЛЖИТЬ БЕЗ ОБНОВЛЕНИЯ"))
+            }
+        }
+        is UpdatePromptState.Downloading -> {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text(language.t("Downloading update", "Скачиваем обновление"), fontWeight = FontWeight.SemiBold)
+                        Text(
+                            updateState.progressPercent?.let { "$it%" }
+                                ?: language.t("Downloading…", "Скачивание…"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+        is UpdatePromptState.Ready -> {
+            StatusCard(
+                true,
+                language.t("Update downloaded", "Обновление скачано"),
+                language.t("Install it before continuing setup.", "Установите его перед продолжением настройки."),
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { installUpdate(updateState.update) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 14.dp),
+            ) {
+                Text(language.t("INSTALL UPDATE", "УСТАНОВИТЬ ОБНОВЛЕНИЕ"))
+            }
+        }
+        is UpdatePromptState.Error -> {
+            WarningCard(
+                text = language.t("Update download failed", "Не удалось скачать обновление"),
+                detail = language.t("Check your connection and try again.", "Проверьте интернет и попробуйте ещё раз."),
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = { downloadUpdate(updateState.release) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(language.t("RETRY", "ПОВТОРИТЬ"))
+            }
+            TextButton(onClick = dismissUpdate, modifier = Modifier.fillMaxWidth()) {
+                Text(language.t("CONTINUE WITHOUT UPDATE", "ПРОДОЛЖИТЬ БЕЗ ОБНОВЛЕНИЯ"))
+            }
+        }
+    }
+}
+
+@Composable
 private fun ModeChoiceStep(
     language: AppLanguage,
     screenOffEnabled: Boolean,
@@ -404,7 +564,7 @@ private fun ModeChoiceStep(
     openSetupVideo: () -> Unit,
 ) {
     StepHeading(
-        "00",
+        "01",
         language.t("Choose setup mode", "Выберите режим работы"),
         language.t(
             "You can change this later in Settings.",
@@ -485,7 +645,7 @@ private fun BaseSetupStep(
     clearDiagnostics: () -> Unit,
 ) {
     StepHeading(
-        "01",
+        "02",
         language.t("Release Essential Key", "Освободите Essential Key"),
         language.t(
             "Essential Remap disables the two Nothing components that currently own the button. Their data is kept and the change can be restored later.",
@@ -651,7 +811,7 @@ private fun AccessibilityStep(
     openAccessibilitySettings: () -> Unit,
 ) {
     StepHeading(
-        "02",
+        "03",
         language.t("Enable Essential Remap", "Включите Essential Remap"),
         language.t(
             "Accessibility lets the app receive the Essential Key while Android is in use. Essential Remap does not read screen content.",
@@ -696,7 +856,7 @@ private fun SleepSetupStep(
     clearDiagnostics: () -> Unit,
 ) {
     StepHeading(
-        "03",
+        "04",
         language.t("Enable screen-off handling", "Включите работу с выключенным экраном"),
         language.t(
             "The sleep monitor runs with Android's shell privileges and listens only for Essential Key. It does not hold a wake lock. After a phone reboot it must be restarted.",
@@ -740,7 +900,7 @@ private fun SleepSetupStep(
 @Composable
 private fun ReadyStep(language: AppLanguage, screenOffEnabled: Boolean) {
     StepHeading(
-        if (screenOffEnabled) "04" else "03",
+        if (screenOffEnabled) "05" else "04",
         language.t("Ready", "Готово"),
         if (screenOffEnabled) {
             language.t(

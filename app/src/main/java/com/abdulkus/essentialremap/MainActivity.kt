@@ -127,26 +127,32 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         openDonate = ::openDonate,
-                        checkForUpdates = { startUpdateCheck(showResult = true) },
+                        updateState = updateState,
+                        checkForUpdates = { startUpdateCheck(showResult = userPreferences.onboardingComplete) },
+                        downloadUpdate = ::downloadUpdate,
+                        installUpdate = ::installUpdate,
+                        dismissUpdate = { updatePromptState.value = UpdatePromptState.Dismissed },
                         openSetupVideo = {
                             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://youtube.com/shorts/sUQhYFM9mjo")))
                         },
                         beginPackageSetup = ::beginPackageSetup,
                         copyText = ::copyToClipboard,
                     )
-                    InAppPromptHost(
-                        language = userPreferences.language ?: AppLanguage.ENGLISH,
-                        updateState = updateState,
-                        showSupportPrompt = supportVisible,
-                        onDownloadUpdate = ::downloadUpdate,
-                        onInstallUpdate = ::installUpdate,
-                        onDismissUpdate = { updatePromptState.value = UpdatePromptState.Dismissed },
-                        onDonate = {
-                            showSupportPrompt.value = false
-                            openDonate()
-                        },
-                        onDismissSupport = { showSupportPrompt.value = false },
-                    )
+                    if (userPreferences.onboardingComplete) {
+                        InAppPromptHost(
+                            language = userPreferences.language ?: AppLanguage.ENGLISH,
+                            updateState = updateState,
+                            showSupportPrompt = supportVisible,
+                            onDownloadUpdate = ::downloadUpdate,
+                            onInstallUpdate = ::installUpdate,
+                            onDismissUpdate = { updatePromptState.value = UpdatePromptState.Dismissed },
+                            onDonate = {
+                                showSupportPrompt.value = false
+                                openDonate()
+                            },
+                            onDismissSupport = { showSupportPrompt.value = false },
+                        )
+                    }
                 }
             }
         }
