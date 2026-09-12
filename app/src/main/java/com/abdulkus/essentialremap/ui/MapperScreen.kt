@@ -592,8 +592,8 @@ private fun AdbSetupGuide(
                 AdbGuideLine(
                     "1",
                     language.t(
-                        "Open About phone → Software info.",
-                        "Откройте «О телефоне» → «Информация о ПО».",
+                        "Open About phone → NOTHING OS.",
+                        "Откройте «О телефоне» → «NOTHING OS».",
                     ),
                 )
                 AdbGuideLine(
