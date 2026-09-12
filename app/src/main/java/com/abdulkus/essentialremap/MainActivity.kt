@@ -117,9 +117,7 @@ class MainActivity : ComponentActivity() {
                             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         },
                         openNotificationPolicySettings = ::openNotificationPolicySettings,
-                        openDeveloperOptions = {
-                            startActivity(developerOptionsIntent())
-                        },
+                        openDeveloperOptions = ::openWirelessDebuggingSetup,
                         openAssistantSettings = ::openAssistantSettings,
                         openAppInfo = {
                             startActivity(
@@ -284,6 +282,27 @@ class MainActivity : ComponentActivity() {
         viewModel.startPackageSetup(operation)
     }
 
+    private fun openWirelessDebuggingSetup() {
+        val developerOptionsEnabled =
+            Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
+        val intent = if (developerOptionsEnabled) {
+            wirelessDebuggingIntent()
+        } else {
+            Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+        }
+        runCatching { startActivity(intent) }
+            .onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    }
+
+    private fun wirelessDebuggingIntent(): Intent {
+        val direct = Intent(ACTION_WIRELESS_DEBUGGING_SETTINGS)
+        return if (direct.resolveActivity(packageManager) != null) {
+            direct
+        } else {
+            developerOptionsIntent()
+        }
+    }
+
     private fun developerOptionsIntent() =
         Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).putExtra(
             SETTINGS_FRAGMENT_ARGUMENT_KEY,
@@ -331,6 +350,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_SETTINGS = "open_settings"
+        private const val ACTION_WIRELESS_DEBUGGING_SETTINGS =
+            "android.settings.WIRELESS_DEBUGGING_SETTINGS"
         private const val ACTION_NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS =
             "android.settings.NOTIFICATION_POLICY_ACCESS_DETAIL_SETTINGS"
         private const val SETTINGS_FRAGMENT_ARGUMENT_KEY = ":settings:fragment_args_key"
