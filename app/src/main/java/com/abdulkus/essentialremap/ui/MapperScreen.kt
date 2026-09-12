@@ -512,16 +512,136 @@ private fun BaseSetupStep(
         )
     }
     if (state.setup.packageStatus != NothingPackageStatus.DISABLED && !state.setup.busy) {
+        AdbSetupGuide(
+            language = language,
+            developerOptionsEnabled = state.developerOptionsEnabled,
+            openDeveloperOptions = openDeveloperOptions,
+        )
+        Spacer(Modifier.height(14.dp))
         Button(
             onClick = { beginPackageSetup(PackageOperation.DISABLE) },
+            enabled = state.developerOptionsEnabled,
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 14.dp),
         ) { Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ КНОПКУ")) }
-        TextButton(onClick = openDeveloperOptions, modifier = Modifier.fillMaxWidth()) {
-            Text(language.t("Open developer options", "Открыть настройки разработчика"))
-        }
     }
     ManualCommands(language, copyText, includeSleepMonitor = false)
+}
+
+@Composable
+private fun AdbSetupGuide(
+    language: AppLanguage,
+    developerOptionsEnabled: Boolean,
+    openDeveloperOptions: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                if (developerOptionsEnabled) "WIRELESS ADB" else language.t("BEFORE ADB", "ПЕРЕД ADB"),
+                color = MaterialTheme.colorScheme.primary,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                letterSpacing = 1.sp,
+            )
+            Text(
+                if (developerOptionsEnabled) {
+                    language.t("Wireless debugging setup", "Настройка беспроводной отладки")
+                } else {
+                    language.t("Enable Developer options", "Включите режим разработчика")
+                },
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 5.dp, bottom = 12.dp),
+            )
+            if (developerOptionsEnabled) {
+                AdbGuideLine(
+                    "1",
+                    language.t(
+                        "Open Wireless debugging and turn it on.",
+                        "Откройте «Беспроводную отладку» и включите её.",
+                    ),
+                )
+                AdbGuideLine(
+                    "2",
+                    language.t(
+                        "Return here and tap Release key.",
+                        "Вернитесь сюда и нажмите «Освободить кнопку».",
+                    ),
+                )
+                AdbGuideLine(
+                    "3",
+                    language.t(
+                        "When Wireless debugging opens again, tap “Pair device with pairing code”. Enter the 6-digit code in Essential Remap or its notification.",
+                        "Когда «Беспроводная отладка» откроется снова, нажмите «Сопряжение с помощью кода». Введите 6-значный код в Essential Remap или через его уведомление.",
+                    ),
+                )
+                OutlinedButton(
+                    onClick = openDeveloperOptions,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                ) {
+                    Text(
+                        language.t("OPEN WIRELESS DEBUGGING", "ОТКРЫТЬ БЕСПРОВОДНУЮ ОТЛАДКУ"),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                AdbGuideLine(
+                    "1",
+                    language.t(
+                        "Open About phone → Software info.",
+                        "Откройте «О телефоне» → «Информация о ПО».",
+                    ),
+                )
+                AdbGuideLine(
+                    "2",
+                    language.t(
+                        "Tap Build number 7 times and confirm your screen lock if Android asks.",
+                        "Нажмите 7 раз на «Номер сборки» и подтвердите блокировку экрана, если Android попросит.",
+                    ),
+                )
+                AdbGuideLine(
+                    "3",
+                    language.t(
+                        "Return to Essential Remap. This screen will update automatically.",
+                        "Вернитесь в Essential Remap. Этот экран обновится автоматически.",
+                    ),
+                )
+                OutlinedButton(
+                    onClick = openDeveloperOptions,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                ) {
+                    Text(language.t("OPEN ABOUT PHONE", "ОТКРЫТЬ «О ТЕЛЕФОНЕ»"), textAlign = TextAlign.Center)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdbGuideLine(number: String, text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 9.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            number,
+            modifier = Modifier.width(24.dp),
+            color = MaterialTheme.colorScheme.primary,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text,
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            lineHeight = 18.sp,
+        )
+    }
 }
 
 @Composable
@@ -671,6 +791,17 @@ private fun SetupProgress(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = if (state.setup.busy) 12.dp else 0.dp),
             )
+            if (state.setup.phase == SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING) {
+                Text(
+                    language.t(
+                        "Turn on Wireless debugging and leave it enabled. Essential Remap will reconnect automatically.",
+                        "Включите «Беспроводную отладку» и оставьте её включённой. Essential Remap подключится автоматически.",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             state.setup.message?.takeIf { state.setup.phase == SetupPhase.ERROR }?.let {
                 Text(
                     it.takeLast(800),
@@ -679,6 +810,16 @@ private fun SetupProgress(
                 )
             }
             if (state.setup.phase == SetupPhase.WAITING_FOR_CODE) {
+                Text(
+                    language.t(
+                        "In Wireless debugging, tap “Pair device with pairing code”. Keep the Android pairing window open, then enter the 6-digit code shown there below. You can also submit it from the Essential Remap notification.",
+                        "В «Беспроводной отладке» нажмите «Сопряжение с помощью кода». Не закрывайте окно сопряжения Android и введите показанный там 6-значный код ниже. Код также можно отправить прямо из уведомления Essential Remap.",
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 7.dp),
+                )
                 OutlinedTextField(
                     value = pairingCode,
                     onValueChange = changePairingCode,
