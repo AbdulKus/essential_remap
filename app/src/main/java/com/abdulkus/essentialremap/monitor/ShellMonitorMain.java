@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
+    public static final int STATE_REVISION = 10;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -96,7 +97,7 @@ public final class ShellMonitorMain {
                     .redirectErrorStream(true).start();
                 inputProcess = process;
                 inputReady = true;
-                writeFile("key-monitor.state", "revision=" + MonitorMessage.REVISION + " pid=" +
+                writeFile("key-monitor.state", "revision=" + STATE_REVISION + " pid=" +
                     android.os.Process.myPid() + " input=" + device + " session=" + session);
                 emit("READY", 0, 0);
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
