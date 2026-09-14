@@ -1,5 +1,6 @@
 package com.abdulkus.essentialremap
 
+import com.abdulkus.essentialremap.monitor.ShellMonitorMain
 import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
 import java.nio.file.Files
 import java.util.Base64
@@ -9,6 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShellKeyMonitorCommandsTest {
+    @Test
+    fun stateRevisionMatchesInstallerRevision() {
+        assertEquals(ShellKeyMonitorCommands.REVISION, ShellMonitorMain.STATE_REVISION)
+    }
+
     @Test
     fun installerPayloadDecodesToExactScriptAndTransportLength() {
         val installer = ShellKeyMonitorCommands.installSessionScript
