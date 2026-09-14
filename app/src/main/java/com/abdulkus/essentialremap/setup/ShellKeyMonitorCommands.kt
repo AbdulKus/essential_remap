@@ -8,7 +8,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 10
+    const val REVISION = 11
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
@@ -53,7 +53,7 @@ object ShellKeyMonitorCommands {
             case "${'$'}candidate_pid" in ''|*[!0-9]*) continue ;; esac
             shift
             case "${'$'}*" in
-              essential-remap-monitor*|*"$SCRIPT"*' run'*) echo "${'$'}candidate_pid" ;;
+              essential-remap-monitor*|*"$SCRIPT"*' run'*|*"$SCRIPT"*' supervise'*) echo "${'$'}candidate_pid" ;;
             esac
           done
         }
@@ -134,18 +134,17 @@ object ShellKeyMonitorCommands {
             app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap | /system/bin/grep -E '^package:com[.]abdulkus[.]essentialremap uid:[0-9]+$')"
             app_uid="${'$'}{app_info##*uid:}"
             case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
-            # Start the final app_process directly in its own session. Keeping a long-lived shell
-            # supervisor here makes some Android builds tie the monitor lifetime to adbd/Wi-Fi.
-            # nohup + setsid + closed stdio mirrors the daemonization pattern used by persistent
-            # shell services: Wireless debugging is only needed for this one launch.
-            log_monitor "launch direct uid=${'$'}app_uid parent=${'$'}${'$'}"
+            # Keep one tiny shell supervisor blocked in wait(). The actual app_process gets its own
+            # session too, so a Wireless-ADB/adbd teardown can kill the child without losing our
+            # ability to restart it. There is no idle polling or periodic wakeup here.
+            log_monitor "launch supervisor uid=${'$'}app_uid parent=${'$'}${'$'}"
             if command -v setsid >/dev/null 2>&1; then
-              /system/bin/nohup setsid /system/bin/sh "$SCRIPT" run "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
+              /system/bin/nohup /system/bin/setsid -d /system/bin/sh "$SCRIPT" supervise "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             else
-              /system/bin/nohup /system/bin/sh "$SCRIPT" run "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
+              /system/bin/nohup /system/bin/sh "$SCRIPT" supervise "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             fi
-            launcher_pid=${'$'}!
-            log_monitor "launcher pid=${'$'}launcher_pid"
+            supervisor_pid=${'$'}!
+            log_monitor "supervisor launcher pid=${'$'}supervisor_pid"
             wait_count=0
             while [ "${'$'}wait_count" -lt 60 ]; do
               if monitor_is_running; then echo "$START_CONFIRMATION ${'$'}monitor_state"; exit 0; fi
@@ -157,14 +156,50 @@ object ShellKeyMonitorCommands {
             stop_all_monitors
             exit 1
             ;;
+          supervise)
+            trap '' HUP
+            trap 'exit 0' INT TERM
+            app_uid="${'$'}{2:-}"
+            case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
+            failures=0
+            log_monitor "supervisor active pid=${'$'}${'$'} ppid=${'$'}PPID uid=${'$'}app_uid"
+            while [ ! -e "${'$'}DIR/stop-requested" ]; do
+              began="${'$'}(/system/bin/date +%s 2>/dev/null)"
+              case "${'$'}began" in ''|*[!0-9]*) began=0 ;; esac
+              if command -v setsid >/dev/null 2>&1; then
+                /system/bin/setsid -d /system/bin/sh "$SCRIPT" run "${'$'}app_uid" &
+              else
+                /system/bin/sh "$SCRIPT" run "${'$'}app_uid" &
+              fi
+              helper_pid=${'$'}!
+              log_monitor "monitor child pid=${'$'}helper_pid failures=${'$'}failures"
+              wait "${'$'}helper_pid"
+              child_status=${'$'}?
+              [ -e "${'$'}DIR/stop-requested" ] && break
+              ended="${'$'}(/system/bin/date +%s 2>/dev/null)"
+              case "${'$'}ended" in ''|*[!0-9]*) ended=0 ;; esac
+              runtime=0
+              [ "${'$'}began" -gt 0 ] && [ "${'$'}ended" -ge "${'$'}began" ] && runtime=${'$'}((ended - began))
+              if [ "${'$'}runtime" -ge 30 ]; then failures=0; else failures=${'$'}((failures + 1)); fi
+              log_monitor "monitor child exited status=${'$'}child_status runtime=${'$'}runtime failures=${'$'}failures"
+              if [ "${'$'}failures" -ge 5 ]; then
+                log_monitor 'monitor crash loop exhausted; explicit restart required'
+                break
+              fi
+              delay=${'$'}failures
+              [ "${'$'}delay" -lt 1 ] && delay=1
+              [ "${'$'}delay" -gt 5 ] && delay=5
+              /system/bin/sleep "${'$'}delay"
+            done
+            ;;
           run)
-            # nohup sets SIGHUP to ignored; repeat it explicitly before exec so app_process keeps it.
+            # The supervisor launches each monitor child into a separate session. If Android tears
+            # that session down with adbd, the supervisor can create a fresh one without ADB.
             trap '' HUP
             app_uid="${'$'}{2:-}"
             case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
             export CLASSPATH="${'$'}HELPER_APK"
-            log_monitor "exec app_process pid=${'$'}${'$'} uid=${'$'}app_uid"
-            # exec is intentional: there is no long-lived shell parent left for adbd to tear down.
+            log_monitor "exec app_process pid=${'$'}${'$'} ppid=${'$'}PPID uid=${'$'}app_uid"
             exec /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
               com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR"
             ;;
