@@ -40,6 +40,7 @@ class SetupDiagnostics(context: Context) {
                 appendLine("Process: ${Process.myPid()}")
                 appendLine("Nothing packages: ${NothingPackageStatusReader(appContext).read()}")
                 appendLine("Screen-off marker: ${ScreenOffKeyAccess.isGranted(appContext)}")
+                appendLine("ADB lifetime: ${AdbLifetimeState.read(appContext)} (-1 = unavailable)")
                 val power = appContext.getSystemService(PowerManager::class.java)
                 appendLine("Power: interactive=${power.isInteractive} deviceIdle=${power.isDeviceIdleMode} batteryExempt=${power.isIgnoringBatteryOptimizations(appContext.packageName)}")
                 appendLine("Bridge: ${(appContext as? EssentialKeyApplication)?.container?.shellBridge?.report()}")

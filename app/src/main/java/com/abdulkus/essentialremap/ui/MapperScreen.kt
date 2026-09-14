@@ -871,7 +871,10 @@ private fun SleepSetupStep(
         } else {
             language.t("Sleep monitor is not running", "Монитор сна не запущен")
         },
-        detail = language.t("Required only with the display off", "Нужен только при выключенном экране"),
+        detail = language.t(
+            "Keep USB debugging enabled so Android does not stop the monitor when Wi-Fi disconnects. No cable is needed. Restart after a phone reboot.",
+            "Оставьте «Отладку по USB» включённой, чтобы Android не останавливал монитор при отключении Wi-Fi. Кабель не нужен. После перезагрузки телефона нужен перезапуск.",
+        ),
     )
     Spacer(Modifier.height(14.dp))
     if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
@@ -1668,8 +1671,8 @@ private fun SettingsDialog(
                                 language.t("Sleep monitor needs restart", "Монитор сна нужно перезапустить")
                             },
                             language.t(
-                                "Required with the display off; restart after every phone reboot",
-                                "Нужен при выключенном экране; после перезагрузки телефона требуется перезапуск",
+                                "Keep USB debugging enabled when turning Wi-Fi off. No cable is needed. Restart the monitor after a phone reboot.",
+                                "При отключении Wi-Fi оставьте «Отладку по USB» включённой. Кабель не нужен. После перезагрузки телефона перезапустите монитор.",
                             ),
                         )
                     }

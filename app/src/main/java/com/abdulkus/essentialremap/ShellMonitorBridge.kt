@@ -62,14 +62,16 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
 
     fun requestConnect() {
         if (!preferences.screenOffEnabled || endpoint == null) return
-        if (socket != null) {
+        val probedSocket = socket
+        val probedWriter = writer
+        if (probedSocket != null) {
             val requestedAt = SystemClock.elapsedRealtime()
             scope.launch {
-                runCatching { writer?.println("PING") }
+                runCatching { probedWriter?.println("PING") }
                 delay(1_500) // Only a requested probe, never a recurring heartbeat.
-                if (lastReadyElapsed < requestedAt && socket != null) {
+                if (lastReadyElapsed < requestedAt && socket === probedSocket) {
                     diagnostics.log("Bridge: requested health probe timed out")
-                    closeSocket()
+                    runCatching { probedSocket.close() }
                 }
             }
             return
@@ -78,8 +80,11 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         scope.launch {
             var attemptedEndpoint = endpoint
             try {
-                repeat(3) { attempt ->
-                    if (attempt > 0) delay(250L shl attempt)
+                var failures = 0
+                var reconnecting = false
+                while (failures < 3 && preferences.screenOffEnabled) {
+                    if (reconnecting) delay(250L shl maxOf(1, failures))
+                    reconnecting = true
                     val target = endpoint ?: return@launch
                     attemptedEndpoint = target
                     val candidate = Socket()
@@ -95,20 +100,28 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                             while (true) {
                                 val line = MonitorTransport.readLine(input) ?: break
                                 val message = MonitorMessage.parse(line)
-                                if (message.kind == "READY") candidate.soTimeout = 0
+                                if (message.kind == "READY" &&
+                                    message.fresh(SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())) {
+                                    candidate.soTimeout = 0
+                                    // Bound consecutive failures, not the lifetime number of connections.
+                                    failures = 0
+                                }
                                 receive(message, "socket")
                                 output.println("ACK ${message.number}")
                                 check(!output.checkError()) { "ACK write failed" }
                             }
                         }
                     } catch (error: Exception) {
-                        diagnostics.log("Bridge: connection attempt=${attempt + 1} ${error.javaClass.simpleName}: ${error.message}")
+                        diagnostics.log("Bridge: connection failure=${failures + 1} ${error.javaClass.simpleName}: ${error.message}")
                     } finally {
+                        failures++
                         runCatching { candidate.close() }
                         if (socket === candidate) {
                             socket = null
                             writer = null
                             ScreenOffKeyAccess.setRuntimeHealthy(false)
+                            diagnostics.log("Bridge: disconnected " +
+                                com.abdulkus.essentialremap.setup.AdbLifetimeState.read(appContext))
                             // A transport reconnect is not an input reset. Keep fresh pending DOWNs.
                         }
                     }
