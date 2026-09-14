@@ -89,8 +89,8 @@ addition = '''    @Test
     fun detachedLauncherExecsTheMonitorInsteadOfKeepingAShellSupervisor() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
         assertTrue(script.contains("setsid /system/bin/sh"))
-        assertTrue(script.contains("run \"${'$'}app_uid\""))
         val runBlock = script.substringAfter("          run)\\n").substringBefore("          stop)\\n")
+        assertTrue(runBlock.contains("app_uid="))
         assertTrue(runBlock.contains("exec /system/bin/app_process"))
         assertFalse(runBlock.contains("restarts="))
         assertFalse(runBlock.contains("helper_pid="))
