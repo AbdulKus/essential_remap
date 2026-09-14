@@ -38,10 +38,10 @@ class ShellKeyMonitorCommandsTest {
     @Test
     fun detachedSupervisorCanRestartASeparateMonitorSession() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
-        assertTrue(script.contains("/system/bin/setsid -d /system/bin/sh \"\$SCRIPT\" supervise"))
+        assertTrue(script.contains("/system/bin/setsid -d /system/bin/sh") && script.contains(" supervise \"\$app_uid\""))
         val superviseBlock = script.substringAfter("  supervise)\n").substringBefore("  run)\n")
         assertTrue(superviseBlock.contains("wait \"\$helper_pid\""))
-        assertTrue(superviseBlock.contains("/system/bin/setsid -d /system/bin/sh \"\$SCRIPT\" run"))
+        assertTrue(superviseBlock.contains("/system/bin/setsid -d /system/bin/sh") && superviseBlock.contains(" run \"\$app_uid\""))
         assertTrue(superviseBlock.contains("failures"))
         assertTrue(superviseBlock.contains("monitor crash loop exhausted"))
         assertFalse(superviseBlock.contains("while true"))
