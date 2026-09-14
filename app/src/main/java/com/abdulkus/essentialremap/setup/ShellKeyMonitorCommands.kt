@@ -8,7 +8,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 9
+    const val REVISION = 10
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
@@ -131,11 +131,21 @@ object ShellKeyMonitorCommands {
               /system/bin/chmod 400 "${'$'}HELPER_APK.new" &&
               /system/bin/mv -f "${'$'}HELPER_APK.new" "${'$'}HELPER_APK" || exit 1
             /system/bin/rm -f "${'$'}DIR/stop-requested"
+            app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap | /system/bin/grep -E '^package:com[.]abdulkus[.]essentialremap uid:[0-9]+$')"
+            app_uid="${'$'}{app_info##*uid:}"
+            case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
+            # Start the final app_process directly in its own session. Keeping a long-lived shell
+            # supervisor here makes some Android builds tie the monitor lifetime to adbd/Wi-Fi.
+            # nohup + setsid + closed stdio mirrors the daemonization pattern used by persistent
+            # shell services: Wireless debugging is only needed for this one launch.
+            log_monitor "launch direct uid=${'$'}app_uid parent=${'$'}${'$'}"
             if command -v setsid >/dev/null 2>&1; then
-              /system/bin/nohup setsid /system/bin/sh "$SCRIPT" run </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
+              /system/bin/nohup setsid /system/bin/sh "$SCRIPT" run "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             else
-              /system/bin/nohup /system/bin/sh "$SCRIPT" run </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
+              /system/bin/nohup /system/bin/sh "$SCRIPT" run "${'$'}app_uid" </dev/null >"${'$'}DIR/helper-start.log" 2>&1 &
             fi
+            launcher_pid=${'$'}!
+            log_monitor "launcher pid=${'$'}launcher_pid"
             wait_count=0
             while [ "${'$'}wait_count" -lt 60 ]; do
               if monitor_is_running; then echo "$START_CONFIRMATION ${'$'}monitor_state"; exit 0; fi
@@ -148,23 +158,15 @@ object ShellKeyMonitorCommands {
             exit 1
             ;;
           run)
+            # nohup sets SIGHUP to ignored; repeat it explicitly before exec so app_process keeps it.
             trap '' HUP
-            app_info="${'$'}(/system/bin/cmd package list packages -U --user 0 com.abdulkus.essentialremap | /system/bin/grep -E '^package:com[.]abdulkus[.]essentialremap uid:[0-9]+$')"
-            app_uid="${'$'}{app_info##*uid:}"
+            app_uid="${'$'}{2:-}"
             case "${'$'}app_uid" in ''|*[!0-9]*) echo essential-remap:monitor-uid-unresolved; exit 1 ;; esac
             export CLASSPATH="${'$'}HELPER_APK"
-            trap 'exit 0' INT TERM
-            restarts=0
-            while [ "${'$'}restarts" -lt 3 ] && [ ! -e "${'$'}DIR/stop-requested" ]; do
-              /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
-                com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR" &
-              helper_pid=${'$'}!
-              wait "${'$'}helper_pid"
-              [ -e "${'$'}DIR/stop-requested" ] && break
-              restarts=${'$'}((restarts + 1))
-              log_monitor "helper exited; recovery=${'$'}restarts/3"
-              [ "${'$'}restarts" -lt 3 ] && /system/bin/sleep "${'$'}restarts"
-            done
+            log_monitor "exec app_process pid=${'$'}${'$'} uid=${'$'}app_uid"
+            # exec is intentional: there is no long-lived shell parent left for adbd to tear down.
+            exec /system/bin/app_process /system/bin --nice-name=essential-remap-monitor \
+              com.abdulkus.essentialremap.monitor.ShellMonitorMain "${'$'}app_uid" "${'$'}DIR"
             ;;
           stop)
             acquire_lock || exit 1

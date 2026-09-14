@@ -4,6 +4,8 @@ import com.abdulkus.essentialremap.setup.ShellKeyMonitorCommands
 import java.nio.file.Files
 import java.util.Base64
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ShellKeyMonitorCommandsTest {
@@ -25,6 +27,17 @@ class ShellKeyMonitorCommandsTest {
             val output = process.inputStream.bufferedReader().readText()
             assertEquals(output, 0, process.waitFor())
         }
+    }
+
+    @Test
+    fun detachedLauncherExecsTheMonitorInsteadOfKeepingAShellSupervisor() {
+        val script = ShellKeyMonitorCommands.scriptForTesting()
+        assertTrue(script.contains("setsid /system/bin/sh"))
+        val runBlock = script.substringAfter("          run)\n").substringBefore("          stop)\n")
+        assertTrue(runBlock.contains("app_uid="))
+        assertTrue(runBlock.contains("exec /system/bin/app_process"))
+        assertFalse(runBlock.contains("restarts="))
+        assertFalse(runBlock.contains("helper_pid="))
     }
 
     @Test
