@@ -36,17 +36,14 @@ class ShellKeyMonitorCommandsTest {
     }
 
     @Test
-    fun detachedSupervisorCanRestartASeparateMonitorSession() {
+    fun detachedLauncherExecsTheMonitorInsteadOfKeepingAShellSupervisor() {
         val script = ShellKeyMonitorCommands.scriptForTesting()
-        assertTrue(script.contains("/system/bin/setsid -d /system/bin/sh") && script.contains(" supervise \"\$app_uid\""))
-        val superviseBlock = script.substringAfter("  supervise)\n").substringBefore("  run)\n")
-        assertTrue(superviseBlock.contains("wait \"\$helper_pid\""))
-        assertTrue(superviseBlock.contains("/system/bin/setsid -d /system/bin/sh") && superviseBlock.contains(" run \"\$app_uid\""))
-        assertTrue(superviseBlock.contains("failures"))
-        assertTrue(superviseBlock.contains("monitor crash loop exhausted"))
-        assertFalse(superviseBlock.contains("while true"))
-        val runBlock = script.substringAfter("  run)\n").substringBefore("  stop)\n")
+        assertTrue(script.contains("setsid /system/bin/sh"))
+        val runBlock = script.substringAfter("          run)\n").substringBefore("          stop)\n")
+        assertTrue(runBlock.contains("app_uid="))
         assertTrue(runBlock.contains("exec /system/bin/app_process"))
+        assertFalse(runBlock.contains("restarts="))
+        assertFalse(runBlock.contains("helper_pid="))
     }
 
     @Test
