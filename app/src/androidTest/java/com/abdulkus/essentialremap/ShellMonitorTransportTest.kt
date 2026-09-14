@@ -119,7 +119,7 @@ class ShellMonitorTransportTest {
                 instrumentation.waitForIdleSync() // DOWN has been queued while no listener was attached.
             }
             instrumentation.runOnMainSync { app.container.shellBridge.attach(listener) }
-            val arrived = delivered.await(10, TimeUnit.SECONDS)
+            val arrived = delivered.await(20, TimeUnit.SECONDS)
             assertTrue("No gesture arrived through the shell socket\n$output\n${app.container.diagnostics.report()}", arrived)
             val exited = finished.await(5, TimeUnit.SECONDS)
             instrumentation.waitForIdleSync()

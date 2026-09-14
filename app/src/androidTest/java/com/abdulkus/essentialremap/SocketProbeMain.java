@@ -28,7 +28,9 @@ public final class SocketProbeMain {
                 "com.abdulkus.essentialremap/.ShellKeyEventReceiver", "--es", "bridge_message",
                 new MonitorMessage(session, 1, "READY", 0, 0, SystemClock.elapsedRealtime()).encode(),
                 "--ei", "bridge_port", Integer.toString(server.getLocalPort()), "--es", "bridge_secret", secret).start();
-            if (!bootstrap.waitFor(3, TimeUnit.SECONDS) || bootstrap.exitValue() != 0) {
+            // A freshly booted emulator can spend several seconds starting the broadcast path.
+            // This is fixture startup, not a reason to relax production gesture freshness.
+            if (!bootstrap.waitFor(8, TimeUnit.SECONDS) || bootstrap.exitValue() != 0) {
                 bootstrap.destroyForcibly();
                 throw new AssertionError("protected bootstrap failed");
             }
@@ -39,6 +41,8 @@ public final class SocketProbeMain {
                 PrintWriter out = channel.output;
                 BufferedReader in = channel.input;
                 send(out, in, new MonitorMessage(session, 2, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                System.out.println("PROBE_CONNECTED");
+                System.out.flush();
                 long nextNumber = 3;
                 if (args.length > 1 && args[1].equals("reconnect_many")) {
                     // Five healthy connections must not consume a lifetime retry budget.
