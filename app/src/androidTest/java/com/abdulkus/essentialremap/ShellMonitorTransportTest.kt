@@ -58,6 +58,8 @@ class ShellMonitorTransportTest {
             val deadline = android.os.SystemClock.elapsedRealtime() + 5_000
             while (android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", 0) == 0 &&
                 android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
+            assertEquals("Wi-Fi must be enabled before testing its loss", 1,
+                android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", -1))
         }
         val mode = when {
             reconnect -> "reconnect"
