@@ -1,0 +1,63 @@
+name: Apply detached sleep monitor
+
+on:
+  push:
+    branches: [automation/detach-sleep-monitor]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reset target files to main
+        shell: bash
+        run: |
+          cp .github/scripts/apply_detached_monitor.py /tmp/apply_detached_monitor.py
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Apply detached monitor patch
+        run: python3 /tmp/apply_detached_monitor.py
+
+      - name: Verify patch shape
+        shell: bash
+        run: |
+          grep -q 'const val REVISION = 10' app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt
+          grep -q 'exec /system/bin/app_process' app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt
+          grep -q 'versionCode = 31' app/build.gradle.kts
+          grep -q 'versionName = "0.1.31"' app/build.gradle.kts
+          git diff --check
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 16 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Run focused tests and debug build
+        run: ./gradlew --no-daemon testDebugUnitTest --tests com.abdulkus.essentialremap.ShellKeyMonitorCommandsTest assembleDebug
+
+      - name: Commit to main
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt \
+                  app/src/test/java/com/abdulkus/essentialremap/ShellKeyMonitorCommandsTest.kt \
+                  app/build.gradle.kts
+          git commit -m 'Detach sleep monitor from Wireless ADB session'
+          git push origin HEAD:main
