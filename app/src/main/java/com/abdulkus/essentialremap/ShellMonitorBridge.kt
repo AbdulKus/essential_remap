@@ -1,5 +1,6 @@
 package com.abdulkus.essentialremap
 
+import android.content.ComponentName
 import android.content.Context
 import java.net.Socket
 import java.net.InetSocketAddress
@@ -13,12 +14,16 @@ import com.abdulkus.essentialremap.monitor.MonitorMessage
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import com.abdulkus.essentialremap.ui.UserPreferences
 import java.io.PrintWriter
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** One blocking local socket; reconnect only at activation, a real disconnect, or a user probe. */
 class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnostics) {
@@ -37,6 +42,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     private val handler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connecting = AtomicBoolean(false)
+    private val commandReplies = ConcurrentHashMap<String, CompletableDeferred<Result<Unit>>>()
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var lastReadyElapsed = 0L
@@ -99,6 +105,10 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                         channel.input.use { input ->
                             while (true) {
                                 val line = MonitorTransport.readLine(input) ?: break
+                                if (line.startsWith("TILE_RESULT ")) {
+                                    receiveCommandReply(line)
+                                    continue
+                                }
                                 val message = MonitorMessage.parse(line)
                                 if (message.kind == "READY" &&
                                     message.fresh(SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())) {
@@ -107,8 +117,10 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                                     failures = 0
                                 }
                                 receive(message, "socket")
-                                output.println("ACK ${message.number}")
-                                check(!output.checkError()) { "ACK write failed" }
+                                synchronized(output) {
+                                    output.println("ACK ${message.number}")
+                                    check(!output.checkError()) { "ACK write failed" }
+                                }
                             }
                         }
                     } catch (error: Exception) {
@@ -119,6 +131,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                         if (socket === candidate) {
                             socket = null
                             writer = null
+                            failCommandReplies("Sleep monitor disconnected")
                             ScreenOffKeyAccess.setRuntimeHealthy(false)
                             diagnostics.log("Bridge: disconnected " +
                                 com.abdulkus.essentialremap.setup.AdbLifetimeState.read(appContext))
@@ -131,6 +144,56 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                 if (endpoint != attemptedEndpoint) requestConnect()
             }
         }
+    }
+
+    suspend fun clickQuickSettingsTile(componentName: String): Result<Unit> {
+        if (!preferences.screenOffEnabled) {
+            return Result.failure(IllegalStateException("Sleep monitor is disabled"))
+        }
+        if (!ScreenOffKeyAccess.isGranted(appContext)) {
+            return Result.failure(IllegalStateException("Sleep monitor is not running"))
+        }
+        if (ComponentName.unflattenFromString(componentName) == null) {
+            return Result.failure(IllegalArgumentException("Invalid Quick Settings tile component"))
+        }
+        val activeWriter = writer
+            ?: return Result.failure(IllegalStateException("Sleep monitor is disconnected"))
+        val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
+        val reply = CompletableDeferred<Result<Unit>>()
+        commandReplies[requestId] = reply
+        return try {
+            val sent = synchronized(activeWriter) {
+                activeWriter.println("CLICK_TILE $requestId $componentName")
+                !activeWriter.checkError()
+            }
+            if (!sent) {
+                Result.failure(IllegalStateException("Could not send command to sleep monitor"))
+            } else {
+                withTimeoutOrNull(2_000L) { reply.await() }
+                    ?: Result.failure(IllegalStateException("Sleep monitor did not answer the tile command"))
+            }
+        } finally {
+            commandReplies.remove(requestId)
+        }
+    }
+
+    private fun receiveCommandReply(line: String) {
+        val parts = line.split(' ', limit = 4)
+        if (parts.size < 3) return
+        val requestId = parts[1]
+        val pending = commandReplies.remove(requestId) ?: return
+        if (parts[2] == "OK") {
+            pending.complete(Result.success(Unit))
+        } else {
+            val detail = parts.getOrNull(3).orEmpty().ifBlank { "Quick Settings tile command failed" }
+            pending.complete(Result.failure(IllegalStateException(detail)))
+        }
+    }
+
+    private fun failCommandReplies(message: String) {
+        val pending = commandReplies.values.toList()
+        commandReplies.clear()
+        pending.forEach { it.complete(Result.failure(IllegalStateException(message))) }
     }
 
     fun receive(message: MonitorMessage, transport: String) {

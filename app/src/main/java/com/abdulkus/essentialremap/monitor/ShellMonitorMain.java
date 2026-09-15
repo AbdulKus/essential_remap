@@ -1,5 +1,6 @@
 package com.abdulkus.essentialremap.monitor;
 
+import android.content.ComponentName;
 import android.net.LocalServerSocket;
 import java.net.Socket;
 import java.net.ServerSocket;
@@ -247,9 +248,40 @@ public final class ShellMonitorMain {
                     } else if (line.equals("PING")) {
                         java.lang.Process process = inputProcess;
                         emit(inputReady && process != null && process.isAlive() ? "READY" : "RESET", 0, 0);
+                    } else if (line.startsWith("CLICK_TILE ")) {
+                        handleTileClick(line);
                     }
                 }
             } catch (Exception ignored) { } finally { close(); }
+        }
+        void handleTileClick(String line) {
+            String[] parts = line.split(" ", 3);
+            if (parts.length != 3 || !parts[1].matches("[0-9a-f]{12}")) return;
+            String requestId = parts[1];
+            ComponentName component = ComponentName.unflattenFromString(parts[2]);
+            if (component == null) {
+                sendControl("TILE_RESULT " + requestId + " ERR invalid-component");
+                return;
+            }
+            String normalized = component.flattenToString();
+            thread("essential-tile", () -> {
+                try {
+                    command(1_500, "/system/bin/cmd", "statusbar", "click-tile", normalized);
+                    sendControl("TILE_RESULT " + requestId + " OK");
+                    log("tile click component=" + normalized + " result=ok");
+                } catch (Exception error) {
+                    String detail = error.getMessage();
+                    if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
+                    detail = detail.replace('\n', ' ').replace('\r', ' ');
+                    sendControl("TILE_RESULT " + requestId + " ERR " + detail);
+                    log("tile click component=" + normalized + " result=error " + detail);
+                }
+            });
+        }
+        synchronized void sendControl(String line) {
+            if (closed) return;
+            writer.println(line);
+            if (writer.checkError()) close();
         }
         synchronized void close() {
             if (closed) return;

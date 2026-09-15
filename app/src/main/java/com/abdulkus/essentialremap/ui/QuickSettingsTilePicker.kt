@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import com.abdulkus.essentialremap.platform.QuickSettingsTileInfo
 import com.abdulkus.essentialremap.platform.QuickSettingsTilesReader
 
@@ -40,6 +41,8 @@ fun QuickSettingsTilePickerDialog(
 ) {
     val context = LocalContext.current
     val tiles = remember(context) { QuickSettingsTilesReader(context).read() }
+    val sleepMonitorEnabled = UserPreferences(context).screenOffEnabled
+    val sleepMonitorRunning = sleepMonitorEnabled && ScreenOffKeyAccess.isGranted(context)
     var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(tiles, query) {
         if (query.isBlank()) tiles else tiles.filter {
@@ -71,6 +74,39 @@ fun QuickSettingsTilePickerDialog(
                     }
                 }
                 HorizontalDivider()
+                Surface(
+                    color = if (sleepMonitorRunning) {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = when {
+                            !sleepMonitorEnabled -> language.translate(
+                                "Requires the sleep monitor. Enable it in settings before choosing a tile.",
+                                "Для этого нужен монитор сна. Включите его в настройках перед выбором плитки.",
+                            )
+                            !sleepMonitorRunning -> language.translate(
+                                "The sleep monitor is not running. Restart it before choosing a tile.",
+                                "Монитор сна не запущен. Перезапустите его перед выбором плитки.",
+                            )
+                            else -> language.translate(
+                                "Uses the running sleep monitor to trigger the exact tile directly. Quick Settings will not open.",
+                                "Используется запущенный монитор сна: нужная плитка срабатывает напрямую, без открытия шторки.",
+                            )
+                        },
+                        color = if (sleepMonitorRunning) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -96,12 +132,17 @@ fun QuickSettingsTilePickerDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { select(tile) }
+                                    .clickable(enabled = sleepMonitorRunning) { select(tile) }
                                     .padding(horizontal = 18.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(tile.tileLabel, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        tile.tileLabel,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (sleepMonitorRunning) MaterialTheme.colorScheme.onSurface
+                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                                    )
                                     Text(
                                         tile.appLabel,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
