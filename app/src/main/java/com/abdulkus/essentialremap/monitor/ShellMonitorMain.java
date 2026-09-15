@@ -20,10 +20,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** app_process entry point, running as shell. No Context, external network, alarms, or idle wake lock. */
+/** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 11;
+    public static final int STATE_REVISION = 12;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -52,8 +52,9 @@ public final class ShellMonitorMain {
     }
 
     public static void main(String[] args) throws Exception {
-        if (android.os.Process.myUid() != 2000 || args.length != 2) {
-            throw new IllegalArgumentException("Expected shell UID, application UID and monitor directory");
+        int monitorUid = android.os.Process.myUid();
+        if ((monitorUid != 2000 && monitorUid != 0) || args.length != 2) {
+            throw new IllegalArgumentException("Expected shell/root UID, application UID and monitor directory");
         }
         int uid = Integer.parseInt(args[0]);
         if (uid < 10000) throw new IllegalArgumentException("Invalid application UID");
@@ -99,7 +100,8 @@ public final class ShellMonitorMain {
                 inputProcess = process;
                 inputReady = true;
                 writeFile("key-monitor.state", "revision=" + STATE_REVISION + " pid=" +
-                    android.os.Process.myPid() + " input=" + device + " session=" + session);
+                    android.os.Process.myPid() + " uid=" + android.os.Process.myUid() +
+                    " input=" + device + " session=" + session);
                 emit("READY", 0, 0);
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                     String line;

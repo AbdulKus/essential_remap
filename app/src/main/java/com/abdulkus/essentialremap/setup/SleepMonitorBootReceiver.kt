@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.abdulkus.essentialremap.EssentialKeyApplication
 import com.abdulkus.essentialremap.MainActivity
 import com.abdulkus.essentialremap.R
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
@@ -24,28 +25,60 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
         val preferences = UserPreferences(context)
         if (!preferences.screenOffEnabled) return
 
-        // The shell UID process never survives reboot. Clear the stale marker before notifying.
         ScreenOffKeyAccess.markStopped(context)
-        postReminder(context, preferences.language)
+        if (preferences.setupAccessMode != SetupAccessMode.ROOT) {
+            postReminder(context, preferences.language, rootMode = false)
+            return
+        }
+
+        val pending = goAsync()
+        Thread({
+            val diagnostics = SetupDiagnostics(context)
+            runCatching {
+                diagnostics.log("Boot: starting sleep monitor through root")
+                RootCommandExecutor.requireRoot(ROOT_BOOT_AUTH_TIMEOUT_MS)
+                val setting = RootCommandExecutor.execute(
+                    EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH,
+                    ROOT_BOOT_COMMAND_TIMEOUT_MS,
+                )
+                check(setting.contains(EssentialKeySetupCommands.COMMAND_OK)) { "Root boot setup failed" }
+                val output = RootCommandExecutor.execute(
+                    ShellKeyMonitorCommands.installAndStart,
+                    ROOT_BOOT_MONITOR_TIMEOUT_MS,
+                )
+                check(output.contains(ShellKeyMonitorCommands.START_CONFIRMATION)) {
+                    "Root boot monitor did not confirm startup"
+                }
+                ScreenOffKeyAccess.markStarted(context)
+                cancelReminder(context)
+                (context.applicationContext as? EssentialKeyApplication)?.container?.shellBridge?.requestConnect()
+                diagnostics.log("Boot: root sleep monitor started")
+            }.onFailure { error ->
+                diagnostics.log("Boot: root auto-start failed: ${error.javaClass.simpleName}: ${error.message}")
+                postReminder(context, preferences.language, rootMode = true)
+            }
+            pending.finish()
+        }, "essential-root-boot").apply { isDaemon = true }.start()
     }
 
     companion object {
         private const val CHANNEL_ID = "essential_remap_sleep_monitor"
         private const val NOTIFICATION_ID = 2054
+        private const val ROOT_BOOT_AUTH_TIMEOUT_MS = 4_000L
+        private const val ROOT_BOOT_COMMAND_TIMEOUT_MS = 4_000L
+        private const val ROOT_BOOT_MONITOR_TIMEOUT_MS = 8_000L
 
         fun cancelReminder(context: Context) {
             NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
         }
 
-        private fun postReminder(context: Context, language: AppLanguage?) {
+        private fun postReminder(context: Context, language: AppLanguage?, rootMode: Boolean) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
+            ) return
+
             val selectedLanguage = language ?: AppLanguage.ENGLISH
-            val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(
+            context.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
                     selectedLanguage.translate("Essential Remap sleep monitor", "Монитор сна Essential Remap"),
@@ -60,27 +93,31 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+            val title = if (rootMode) {
+                selectedLanguage.translate("Root sleep monitor needs attention", "Root-монитор сна требует внимания")
+            } else selectedLanguage.translate("Restart the sleep monitor", "Перезапустите монитор сна")
+            val shortText = if (rootMode) {
+                selectedLanguage.translate("Automatic root start failed after reboot.", "Автозапуск через root после перезагрузки не сработал.")
+            } else selectedLanguage.translate(
+                "Screen-off Essential Key handling must be reactivated after a phone reboot.",
+                "Для работы Essential Key с выключенным экраном требуется повторная активация после перезагрузки.",
+            )
+            val detail = if (rootMode) {
+                selectedLanguage.translate(
+                    "Open Essential Remap and tap Restart. ADB is not required; make sure your root manager still allows Essential Remap.",
+                    "Откройте Essential Remap и нажмите «Перезапуск». ADB не нужен; проверьте root-разрешение Essential Remap.",
+                )
+            } else selectedLanguage.translate(
+                "Open Essential Remap, enable Wireless debugging, then tap Restart for the sleep monitor.",
+                "Откройте Essential Remap, включите Wireless debugging и нажмите «Перезапуск» у монитора сна.",
+            )
             NotificationManagerCompat.from(context).notify(
                 NOTIFICATION_ID,
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle(
-                        selectedLanguage.translate("Restart the sleep monitor", "Перезапустите монитор сна"),
-                    )
-                    .setContentText(
-                        selectedLanguage.translate(
-                            "Screen-off Essential Key handling must be reactivated after a phone reboot.",
-                            "Для работы Essential Key с выключенным экраном требуется повторная активация после перезагрузки.",
-                        ),
-                    )
-                    .setStyle(
-                        NotificationCompat.BigTextStyle().bigText(
-                            selectedLanguage.translate(
-                                "Open Essential Remap, enable Wireless debugging, then tap Restart for the sleep monitor.",
-                                "Откройте Essential Remap, включите Wireless debugging и нажмите «Перезапуск» у монитора сна.",
-                            ),
-                        ),
-                    )
+                    .setContentTitle(title)
+                    .setContentText(shortText)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(detail))
                     .setContentIntent(contentIntent)
                     .setAutoCancel(true)
                     .build(),

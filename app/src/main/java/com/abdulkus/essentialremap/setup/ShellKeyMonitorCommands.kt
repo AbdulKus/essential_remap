@@ -8,7 +8,7 @@ object ShellKeyMonitorCommands {
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 11
+    const val REVISION = 12
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 

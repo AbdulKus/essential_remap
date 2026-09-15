@@ -23,6 +23,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.abdulkus.essentialremap.platform.AccessibilityStatusReader
 import com.abdulkus.essentialremap.setup.PackageOperation
+import com.abdulkus.essentialremap.setup.SetupAccessMode
 import com.abdulkus.essentialremap.ui.AppLanguage
 import com.abdulkus.essentialremap.ui.EssentialRemapApp
 import com.abdulkus.essentialremap.ui.EssentialRemapTheme
@@ -79,7 +80,7 @@ class MainActivity : ComponentActivity() {
                     Toast.LENGTH_LONG,
                 ).show()
             }
-            startWirelessSetup(operation)
+            startPackageSetup(operation)
         }
     }
 
@@ -275,20 +276,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun beginPackageSetup(operation: PackageOperation) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        val accessMode = userPreferences.setupAccessMode
+        if (accessMode == SetupAccessMode.NON_ROOT &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             pendingPackageOperation = operation
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        startWirelessSetup(operation)
+        startPackageSetup(operation)
     }
 
-    private fun startWirelessSetup(operation: PackageOperation) {
-        // The coordinator first tries the persisted ADB identity. It opens Wireless debugging
-        // settings only when the service is unavailable or pairing is actually required.
-        viewModel.startPackageSetup(operation)
+    private fun startPackageSetup(operation: PackageOperation) {
+        viewModel.startPackageSetup(operation, userPreferences.setupAccessMode)
     }
 
     private fun openWirelessDebuggingSetup() {
