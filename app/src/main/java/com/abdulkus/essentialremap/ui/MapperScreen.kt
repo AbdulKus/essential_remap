@@ -85,7 +85,9 @@ import com.abdulkus.essentialremap.domain.PressAction
 import com.abdulkus.essentialremap.domain.RequestMethod
 import com.abdulkus.essentialremap.domain.SoundMode
 import com.abdulkus.essentialremap.domain.SystemAction
+import com.abdulkus.essentialremap.platform.LaunchableActivity
 import com.abdulkus.essentialremap.platform.LaunchableApp
+import com.abdulkus.essentialremap.platform.QuickSettingsTileInfo
 import com.abdulkus.essentialremap.setup.NothingPackageStatus
 import com.abdulkus.essentialremap.setup.PackageOperation
 import com.abdulkus.essentialremap.setup.SetupPhase
@@ -194,6 +196,8 @@ fun EssentialRemapApp(
         updateSoundMode = viewModel::updateSoundMode,
         updateSystemAction = viewModel::updateSystemAction,
         updateLaunchApp = viewModel::updateLaunchApp,
+        updateLaunchActivity = viewModel::updateLaunchActivity,
+        updateQuickSettingsTile = viewModel::updateQuickSettingsTile,
         updateRunWhileLocked = viewModel::updateRunWhileLocked,
         setRemappingEnabled = viewModel::setRemappingEnabled,
         updateHaptic = viewModel::updateHaptic,
@@ -881,8 +885,8 @@ private fun AccessibilityStep(
         stepNumber,
         language.t("Enable Essential Remap", "Включите Essential Remap"),
         language.t(
-            "Accessibility lets the app receive the Essential Key while Android is in use. Essential Remap does not read screen content.",
-            "Специальные возможности позволяют приложению получать нажатия Essential Key во время работы Android. Essential Remap не читает содержимое экрана.",
+            "Accessibility receives the Essential Key while Android is in use. Screen content is inspected only when a configured Quick Settings tile must be found and clicked.",
+            "Специальные возможности получают нажатия Essential Key во время работы Android. Содержимое экрана анализируется только при поиске и нажатии настроенной плитки Quick Settings.",
         ),
     )
     Spacer(Modifier.height(22.dp))
@@ -1172,6 +1176,8 @@ private fun HomeScreen(
     updateSoundMode: (PressAction, SoundMode) -> Unit,
     updateSystemAction: (PressAction, SystemAction) -> Unit,
     updateLaunchApp: (PressAction, LaunchableApp) -> Unit,
+    updateLaunchActivity: (PressAction, LaunchableActivity) -> Unit,
+    updateQuickSettingsTile: (PressAction, QuickSettingsTileInfo) -> Unit,
     updateRunWhileLocked: (PressAction, Boolean) -> Unit,
     setRemappingEnabled: (Boolean) -> Unit,
     updateHaptic: (HapticStrength) -> Unit,
@@ -1182,6 +1188,8 @@ private fun HomeScreen(
 ) {
     var actionGesture by remember { mutableStateOf<PressAction?>(null) }
     var appGesture by remember { mutableStateOf<PressAction?>(null) }
+    var activityGesture by remember { mutableStateOf<PressAction?>(null) }
+    var quickSettingsTileGesture by remember { mutableStateOf<PressAction?>(null) }
     var urlGesture by remember { mutableStateOf<PressAction?>(null) }
     var httpGesture by remember { mutableStateOf<PressAction?>(null) }
     var soundGesture by remember { mutableStateOf<PressAction?>(null) }
@@ -1321,6 +1329,8 @@ private fun HomeScreen(
             language = language,
             dismiss = { actionGesture = null },
             chooseApp = { actionGesture = null; appGesture = gesture },
+            chooseActivity = { actionGesture = null; activityGesture = gesture },
+            chooseQuickSettingsTile = { actionGesture = null; quickSettingsTileGesture = gesture },
             chooseUrl = { actionGesture = null; urlGesture = gesture },
             chooseHttp = { actionGesture = null; httpGesture = gesture },
             chooseSound = { actionGesture = null; soundGesture = gesture },
@@ -1337,6 +1347,18 @@ private fun HomeScreen(
         AppPickerDialog(language, state.launchableApps, { appGesture = null }) {
             updateLaunchApp(gesture, it)
             appGesture = null
+        }
+    }
+    activityGesture?.let { gesture ->
+        AppActivityPickerDialog(language, state.launchableApps, { activityGesture = null }) {
+            updateLaunchActivity(gesture, it)
+            activityGesture = null
+        }
+    }
+    quickSettingsTileGesture?.let { gesture ->
+        QuickSettingsTilePickerDialog(language, { quickSettingsTileGesture = null }) {
+            updateQuickSettingsTile(gesture, it)
+            quickSettingsTileGesture = null
         }
     }
     urlGesture?.let { gesture ->
@@ -1496,6 +1518,8 @@ private fun ActionChooserDialog(
     language: AppLanguage,
     dismiss: () -> Unit,
     chooseApp: () -> Unit,
+    chooseActivity: () -> Unit,
+    chooseQuickSettingsTile: () -> Unit,
     chooseUrl: () -> Unit,
     chooseHttp: () -> Unit,
     chooseSound: () -> Unit,
@@ -1506,6 +1530,8 @@ private fun ActionChooserDialog(
 ) {
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
+        ActionOption(language.t("Launch Activity", "Запуск Activity"), run = chooseActivity),
+        ActionOption(language.t("Quick Settings tile", "Плитка Quick Settings"), run = chooseQuickSettingsTile),
         ActionOption("Circle to Search", language.t("Google + Hold handle to search", "Google + удержание полоски для поиска")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
         ActionOption(language.t("Voice assistant", "Голосовой помощник")) { chooseSystem(SystemAction.ASSISTANT) },
         ActionOption(language.t("Flashlight", "Фонарик")) { chooseKind(ActionKind.FLASHLIGHT) },
@@ -2028,7 +2054,11 @@ private fun ConfiguredAction.summary(language: AppLanguage): String = when (this
     ConfiguredAction.ToggleSilent -> language.t("Toggle silent / normal", "Без звука / обычный")
     is ConfiguredAction.Http -> "${method.name} ${endpoint.ifBlank { language.t("request", "запрос") }}"
     is ConfiguredAction.SetSoundMode -> mode.title(language)
-    is ConfiguredAction.LaunchApp -> label.ifBlank { language.t("Choose an app", "Выберите приложение") }
+    is ConfiguredAction.LaunchApp -> label.ifBlank {
+        if (componentName.isBlank()) language.t("Choose an app", "Выберите приложение")
+        else language.t("Launch Activity", "Запуск Activity")
+    }
+    is ConfiguredAction.QuickSettingsTile -> label.ifBlank { language.t("Quick Settings tile", "Плитка Quick Settings") }
     is ConfiguredAction.OpenUrl -> url.ifBlank { language.t("Open link", "Открыть ссылку") }
     is ConfiguredAction.PerformSystemAction -> action.title(language)
 }

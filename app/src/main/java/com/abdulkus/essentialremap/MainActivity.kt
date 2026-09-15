@@ -23,7 +23,6 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.abdulkus.essentialremap.platform.AccessibilityStatusReader
 import com.abdulkus.essentialremap.setup.PackageOperation
-import com.abdulkus.essentialremap.ui.AppActivityActionPicker
 import com.abdulkus.essentialremap.ui.AppLanguage
 import com.abdulkus.essentialremap.ui.EssentialRemapApp
 import com.abdulkus.essentialremap.ui.EssentialRemapTheme
@@ -140,10 +139,6 @@ class MainActivity : ComponentActivity() {
                         copyText = ::copyToClipboard,
                     )
                     if (userPreferences.onboardingComplete) {
-                        AppActivityActionPicker(
-                            viewModel = viewModel,
-                            language = userPreferences.language ?: AppLanguage.ENGLISH,
-                        )
                         InAppPromptHost(
                             language = userPreferences.language ?: AppLanguage.ENGLISH,
                             updateState = updateState,
