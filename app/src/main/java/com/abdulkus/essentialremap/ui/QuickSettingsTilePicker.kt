@@ -94,8 +94,8 @@ fun QuickSettingsTilePickerDialog(
                                 "Монитор сна не запущен. Перезапустите его перед выбором плитки.",
                             )
                             else -> language.translate(
-                                "Uses the running sleep monitor to trigger the exact tile directly. Quick Settings will not open.",
-                                "Используется запущенный монитор сна: нужная плитка срабатывает напрямую, без открытия шторки.",
+                                "Uses the sleep monitor to briefly prepare Quick Settings and trigger the exact tile reliably.",
+                                "Монитор сна кратко подготавливает Quick Settings и надёжно вызывает именно выбранную плитку.",
                             )
                         },
                         color = if (sleepMonitorRunning) {

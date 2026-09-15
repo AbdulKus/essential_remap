@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 10;
+    public static final int STATE_REVISION = 11;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -265,17 +265,35 @@ public final class ShellMonitorMain {
             }
             String normalized = component.flattenToString();
             thread("essential-tile", () -> {
+                String resultLine;
                 try {
+                    // Some TileService implementations (including Amnezia VPN) only bind to their
+                    // backing service from onStartListening(). Briefly entering Quick Settings before
+                    // click-tile reproduces the lifecycle of a real user tap without text/coordinate UI automation.
+                    log("tile prepare component=" + normalized + " stage=expand");
+                    command(1_000, "/system/bin/cmd", "statusbar", "expand-settings");
+                    SystemClock.sleep(350L);
+                    log("tile prepare component=" + normalized + " stage=click");
                     command(1_500, "/system/bin/cmd", "statusbar", "click-tile", normalized);
-                    sendControl("TILE_RESULT " + requestId + " OK");
+                    // Let onClick finish before collapse triggers onStopListening()/unbindService().
+                    SystemClock.sleep(120L);
+                    resultLine = "TILE_RESULT " + requestId + " OK";
                     log("tile click component=" + normalized + " result=ok");
                 } catch (Exception error) {
                     String detail = error.getMessage();
                     if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
                     detail = detail.replace('\n', ' ').replace('\r', ' ');
-                    sendControl("TILE_RESULT " + requestId + " ERR " + detail);
+                    resultLine = "TILE_RESULT " + requestId + " ERR " + detail;
                     log("tile click component=" + normalized + " result=error " + detail);
+                } finally {
+                    try {
+                        command(1_000, "/system/bin/cmd", "statusbar", "collapse");
+                        log("tile prepare component=" + normalized + " stage=collapse");
+                    } catch (Exception collapseError) {
+                        log("tile collapse component=" + normalized + " result=error " + collapseError.getClass().getSimpleName());
+                    }
                 }
+                sendControl(resultLine);
             });
         }
         synchronized void sendControl(String line) {
