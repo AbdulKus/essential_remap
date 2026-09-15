@@ -2,7 +2,7 @@ name: Android build and release
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/activity-and-quick-settings-picker]
   pull_request:
   workflow_dispatch:
 
@@ -29,6 +29,21 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+
+      - name: Apply staged action picker patch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/activity-and-quick-settings-picker'
+        shell: bash
+        run: |
+          if grep -q 'updateQuickSettingsTile' app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt; then
+            echo 'Action picker patch already applied.'
+          else
+            python .github/scripts/apply_action_picker_patch.py
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add app/src/main .github/scripts/apply_action_picker_patch.py
+            git commit -m 'Integrate Activity and Quick Settings actions'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -107,7 +122,6 @@ jobs:
             essential-remap-${{ env.APP_VERSION }}.apk.sha256
             essential-remap-${{ env.APP_VERSION }}-debug.apk
             essential-remap-${{ env.APP_VERSION }}-androidTest.apk
-            app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt
           if-no-files-found: error
           retention-days: 30
 
