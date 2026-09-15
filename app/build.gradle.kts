@@ -12,8 +12,8 @@ android {
         applicationId = "com.abdulkus.essentialremap"
         minSdk = 26
         targetSdk = 36
-        versionCode = 33
-        versionName = "0.1.33"
+        versionCode = 34
+        versionName = "0.1.34"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
