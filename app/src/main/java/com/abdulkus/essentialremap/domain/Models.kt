@@ -49,6 +49,7 @@ enum class ActionKind {
     SOUND_MODE,
     TOGGLE_SILENT,
     LAUNCH_APP,
+    QUICK_SETTINGS_TILE,
     OPEN_URL,
     SYSTEM,
 }
@@ -90,6 +91,14 @@ sealed interface ConfiguredAction {
         val componentName: String = "",
     ) : ConfiguredAction {
         override val kind = ActionKind.LAUNCH_APP
+    }
+
+    data class QuickSettingsTile(
+        val componentName: String = "",
+        val label: String = "",
+        val appLabel: String = "",
+    ) : ConfiguredAction {
+        override val kind = ActionKind.QUICK_SETTINGS_TILE
     }
 
     data class OpenUrl(val url: String = "") : ConfiguredAction {
