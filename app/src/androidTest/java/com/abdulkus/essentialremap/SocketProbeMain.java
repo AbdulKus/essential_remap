@@ -17,6 +17,7 @@ public final class SocketProbeMain {
     public static void main(String[] args) throws Exception {
         if (android.os.Process.myUid() != 2000) throw new AssertionError("probe is not shell");
         ServerSocket server = new ServerSocket(0, 4, InetAddress.getByName(MonitorTransport.HOST));
+        server.setSoTimeout(8_000);
         String secret = MonitorTransport.newSecret();
         String session = UUID.randomUUID().toString().replace("-", "");
         System.out.println("PROBE_READY");
@@ -27,7 +28,9 @@ public final class SocketProbeMain {
                 "com.abdulkus.essentialremap/.ShellKeyEventReceiver", "--es", "bridge_message",
                 new MonitorMessage(session, 1, "READY", 0, 0, SystemClock.elapsedRealtime()).encode(),
                 "--ei", "bridge_port", Integer.toString(server.getLocalPort()), "--es", "bridge_secret", secret).start();
-            if (!bootstrap.waitFor(3, TimeUnit.SECONDS) || bootstrap.exitValue() != 0) {
+            // A freshly booted emulator can spend several seconds starting the broadcast path.
+            // This is fixture startup, not a reason to relax production gesture freshness.
+            if (!bootstrap.waitFor(8, TimeUnit.SECONDS) || bootstrap.exitValue() != 0) {
                 bootstrap.destroyForcibly();
                 throw new AssertionError("protected bootstrap failed");
             }
@@ -38,9 +41,36 @@ public final class SocketProbeMain {
                 PrintWriter out = channel.output;
                 BufferedReader in = channel.input;
                 send(out, in, new MonitorMessage(session, 2, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                System.out.println("PROBE_CONNECTED");
+                System.out.flush();
+                long nextNumber = 3;
+                if (args.length > 1 && args[1].equals("reconnect_many")) {
+                    // Five healthy connections must not consume a lifetime retry budget.
+                    // Reconnect before DOWN so the test does not depend on gesture expiry timing.
+                    for (int i = 0; i < 5; i++) {
+                        peer.close();
+                        peer = server.accept();
+                        channel = MonitorTransport.server(peer, secret);
+                        peer.setSoTimeout(3000);
+                        out = channel.output;
+                        in = channel.input;
+                        send(out, in, new MonitorMessage(session, nextNumber++, "READY", 0, 0, SystemClock.elapsedRealtime()));
+                    }
+                }
+                if (args.length > 1 && args[1].equals("wifi_drop")) {
+                    // UiAutomation starts this helper as shell; the live IPC must survive Wi-Fi loss.
+                    Process toggle = new ProcessBuilder("/system/bin/svc", "wifi", "disable").start();
+                    if (!toggle.waitFor(3, TimeUnit.SECONDS) || toggle.exitValue() != 0) {
+                        toggle.destroyForcibly();
+                        throw new AssertionError("Wi-Fi toggle failed");
+                    }
+                    SystemClock.sleep(1500);
+                    System.out.println("PROBE_WIFI_DISABLED");
+                    System.out.flush();
+                }
                 long down = SystemClock.uptimeMillis() * 1_000_000L;
-                send(out, in, new MonitorMessage(session, 3, "DOWN", down, down, SystemClock.elapsedRealtime()));
-                long actionNumber = 4;
+                send(out, in, new MonitorMessage(session, nextNumber++, "DOWN", down, down, SystemClock.elapsedRealtime()));
+                long actionNumber = nextNumber;
                 if (args.length > 1 && args[1].equals("reconnect")) {
                     peer.close();
                     peer = server.accept();

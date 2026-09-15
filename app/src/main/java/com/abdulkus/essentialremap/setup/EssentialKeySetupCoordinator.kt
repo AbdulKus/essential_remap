@@ -314,7 +314,7 @@ class EssentialKeySetupCoordinator(
         operation: PackageOperation,
     ) {
         try {
-            diagnostics.log("ADB connection established for operation=$operation")
+            diagnostics.log("ADB connection established for operation=$operation ${AdbLifetimeState.read(appContext)}")
             _state.value = _state.value.copy(
                 phase = SetupPhase.APPLYING,
                 message = when (operation) {
@@ -359,10 +359,17 @@ class EssentialKeySetupCoordinator(
                         "Essential Key released. Wireless debugging can be turned off.",
                         "Essential Key освобождена. Wireless debugging можно выключить.",
                     )
-                    PackageOperation.INSTALL_SLEEP_MONITOR -> text(
-                        "Sleep monitor started. Wireless debugging can be turned off.",
-                        "Монитор сна запущен. Wireless debugging можно выключить.",
-                    )
+                    PackageOperation.INSTALL_SLEEP_MONITOR -> if (AdbLifetimeState.read(appContext).usbEnabled) {
+                        text(
+                            "Sleep monitor started. You can turn off Wi-Fi and Wireless debugging; keep USB debugging enabled. No cable is needed.",
+                            "Монитор сна запущен. Wi-Fi и беспроводную отладку можно выключить; оставьте отладку по USB включённой. Кабель не нужен.",
+                        )
+                    } else {
+                        text(
+                            "Sleep monitor started. Before turning off Wi-Fi, enable USB debugging in Developer options and leave it enabled. Otherwise Android may stop the monitor together with Wireless debugging. No cable is needed.",
+                            "Монитор сна запущен. Перед отключением Wi-Fi включите «Отладку по USB» в настройках разработчика и оставьте её включённой. Иначе Android может остановить монитор вместе с беспроводной отладкой. Кабель не нужен.",
+                        )
+                    }
                     PackageOperation.RESTORE -> text(
                         "Essential Space restored. Wireless debugging can be turned off.",
                         "Essential Space восстановлен. Wireless debugging можно выключить.",

@@ -25,7 +25,18 @@ class ShellMonitorTransportTest {
     @Test
     fun shellTransportWorksWithDisplayOffAndDeviceIdle() = runProbe(false, idle = true)
 
-    private fun runProbe(reconnect: Boolean, idle: Boolean = false) {
+    @Test
+    fun healthyConnectionsCanReconnectMoreThanThreeTimes() = runProbe(false, reconnectMany = true)
+
+    @Test
+    fun liveShellTransportSurvivesWifiBeingDisabled() = runProbe(false, wifiDrop = true)
+
+    private fun runProbe(
+        reconnect: Boolean,
+        idle: Boolean = false,
+        reconnectMany: Boolean = false,
+        wifiDrop: Boolean = false,
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val app = context.applicationContext as EssentialKeyApplication
@@ -40,6 +51,22 @@ class ShellMonitorTransportTest {
         fun command(text: String): String = instrumentation.uiAutomation.executeShellCommand(text).use {
             FileInputStream(it.fileDescriptor).bufferedReader().use { reader -> reader.readText() }
         }
+        val wifiWasEnabled = if (wifiDrop) android.provider.Settings.Global.getInt(
+            context.contentResolver, "wifi_on", 0) != 0 else false
+        if (wifiDrop) {
+            command("/system/bin/svc wifi enable")
+            val deadline = android.os.SystemClock.elapsedRealtime() + 5_000
+            while (android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", 0) == 0 &&
+                android.os.SystemClock.elapsedRealtime() < deadline) Thread.sleep(50)
+            assertEquals("Wi-Fi must be enabled before testing its loss", 1,
+                android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", -1))
+        }
+        val mode = when {
+            reconnect -> "reconnect"
+            reconnectMany -> "reconnect_many"
+            wifiDrop -> "wifi_drop"
+            else -> "normal"
+        }
         val deepWasEnabled = if (idle) command("/system/bin/cmd deviceidle enabled deep").trim() else "1"
         var idleResult = ""
         if (idle) {
@@ -50,7 +77,7 @@ class ShellMonitorTransportTest {
         }
         val shell = instrumentation.uiAutomation.executeShellCommandRwe(
             "/system/bin/env CLASSPATH=$classpath /system/bin/app_process /system/bin " +
-                "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid} ${if (reconnect) "reconnect" else "normal"}",
+                "com.abdulkus.essentialremap.SocketProbeMain ${context.applicationInfo.uid} ${mode}",
         )
         shell[1].close() // No stdin is needed; don't keep UiAutomation's input pump alive.
         val output = StringBuffer()
@@ -94,16 +121,21 @@ class ShellMonitorTransportTest {
                 instrumentation.waitForIdleSync() // DOWN has been queued while no listener was attached.
             }
             instrumentation.runOnMainSync { app.container.shellBridge.attach(listener) }
-            val arrived = delivered.await(10, TimeUnit.SECONDS)
+            val arrived = delivered.await(20, TimeUnit.SECONDS)
             assertTrue("No gesture arrived through the shell socket\n$output\n${app.container.diagnostics.report()}", arrived)
             val exited = finished.await(5, TimeUnit.SECONDS)
             instrumentation.waitForIdleSync()
             assertTrue("Probe did not finish: $output", exited)
             assertTrue(output.toString(), output.contains("PROBE_OK"))
+            if (wifiDrop) {
+                assertTrue(output.toString(), output.contains("PROBE_WIFI_DISABLED"))
+                assertEquals(0, android.provider.Settings.Global.getInt(context.contentResolver, "wifi_on", -1))
+            }
             assertEquals(listOf("DOWN", "SINGLE"), received.toList())
         } finally {
             instrumentation.runOnMainSync { app.container.shellBridge.detach(listener) }
             shell.forEach { runCatching { it.close() } }
+            if (wifiDrop) command("/system/bin/svc wifi " + if (wifiWasEnabled) "enable" else "disable")
             if (idle) {
                 command("/system/bin/cmd deviceidle unforce")
                 if (deepWasEnabled == "0") command("/system/bin/cmd deviceidle disable deep")

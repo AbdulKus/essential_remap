@@ -38,6 +38,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android 16 SDK
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
@@ -160,7 +162,7 @@ jobs:
             adb logcat -d > transport-logcat.txt
             adb shell run-as com.abdulkus.essentialremap cat files/essential_key_setup.log > transport-app-log.txt
             cat transport-app-log.txt
-            grep -q 'OK (3 tests)' transport-result.txt
+            grep -q 'OK (5 tests)' transport-result.txt
       - name: Upload transport result
         if: always()
         uses: actions/upload-artifact@v4

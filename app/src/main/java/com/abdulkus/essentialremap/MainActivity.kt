@@ -178,6 +178,9 @@ class MainActivity : ComponentActivity() {
         viewModel.updateAccessibilityStatus(accessibilityStatusReader.read())
         val notificationManager = getSystemService(NotificationManager::class.java)
         viewModel.updateNotificationPolicyAccess(notificationManager.isNotificationPolicyAccessGranted)
+        viewModel.updateUsbDebuggingStatus(
+            com.abdulkus.essentialremap.setup.AdbLifetimeState.read(this).usbEnabled,
+        )
         viewModel.updateDeveloperOptionsStatus(
             Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1,
         )
