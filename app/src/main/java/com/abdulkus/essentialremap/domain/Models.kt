@@ -49,7 +49,6 @@ enum class ActionKind {
     SOUND_MODE,
     TOGGLE_SILENT,
     LAUNCH_APP,
-    LAUNCH_ACTIVITY,
     OPEN_URL,
     SYSTEM,
 }
@@ -88,15 +87,9 @@ sealed interface ConfiguredAction {
     data class LaunchApp(
         val packageName: String = "",
         val label: String = "",
+        val componentName: String = "",
     ) : ConfiguredAction {
         override val kind = ActionKind.LAUNCH_APP
-    }
-
-    data class LaunchActivity(
-        val componentName: String = "",
-        val label: String = "",
-    ) : ConfiguredAction {
-        override val kind = ActionKind.LAUNCH_ACTIVITY
     }
 
     data class OpenUrl(val url: String = "") : ConfiguredAction {
