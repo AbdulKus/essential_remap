@@ -34,7 +34,8 @@ object ScreenOffKeyAccess {
         val preferences = preferences(context)
         return preferences.getBoolean(KEY_STARTED, false) &&
             preferences.getInt(KEY_BOOT_COUNT, -1) == bootCount(context) &&
-            preferences.getInt(KEY_MONITOR_REVISION, -1) == ShellKeyMonitorCommands.REVISION
+            preferences.getInt(KEY_MONITOR_REVISION, -1) == ShellKeyMonitorCommands.REVISION &&
+            preferences.getInt(KEY_COMMAND_CAPABILITY_REVISION, -1) == COMMAND_CAPABILITY_REVISION
     }
 
     fun wasConfigured(context: Context): Boolean =
@@ -45,6 +46,7 @@ object ScreenOffKeyAccess {
             .putBoolean(KEY_STARTED, true)
             .putInt(KEY_BOOT_COUNT, bootCount(context))
             .putInt(KEY_MONITOR_REVISION, ShellKeyMonitorCommands.REVISION)
+            .putInt(KEY_COMMAND_CAPABILITY_REVISION, COMMAND_CAPABILITY_REVISION)
             .apply()
         notifyChanged()
     }
@@ -74,4 +76,6 @@ object ScreenOffKeyAccess {
     private const val KEY_STARTED = "started"
     private const val KEY_BOOT_COUNT = "boot_count"
     private const val KEY_MONITOR_REVISION = "monitor_revision"
+    private const val KEY_COMMAND_CAPABILITY_REVISION = "command_capability_revision"
+    private const val COMMAND_CAPABILITY_REVISION = 1
 }

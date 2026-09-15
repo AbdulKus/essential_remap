@@ -15,7 +15,6 @@ import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
 import com.abdulkus.essentialremap.data.SettingsRepository
 import com.abdulkus.essentialremap.domain.ActionFeedbackPolicy
 import com.abdulkus.essentialremap.domain.AppSettings
@@ -29,7 +28,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -237,7 +235,6 @@ class KeyAccessibilityService : AccessibilityService() {
                     action = config,
                     performGlobalAction = ::performGlobalAction,
                     performNavigationHandleLongPress = ::performNavigationHandleLongPress,
-                    performQuickSettingsTile = ::performQuickSettingsTile,
                 )
                 trace(
                     "action result: press=$action configured=${config.safeName()} " +
@@ -452,79 +449,6 @@ class KeyAccessibilityService : AccessibilityService() {
         else -> "OTHER_$this"
     }
 
-    private suspend fun performQuickSettingsTile(
-        action: ConfiguredAction.QuickSettingsTile,
-    ): ActionExecutionResult = withContext(Dispatchers.Main.immediate) {
-        if (!powerManager.isInteractive) {
-            return@withContext ActionExecutionResult(false, "Quick Settings tile requires the display to be on")
-        }
-        if (keyguardManager.isKeyguardLocked) {
-            return@withContext ActionExecutionResult(false, "Unlock the phone to use a Quick Settings tile")
-        }
-        if (!performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)) {
-            return@withContext ActionExecutionResult(false, "Android rejected opening Quick Settings")
-        }
-
-        var clicked = false
-        for (attempt in 0 until QUICK_SETTINGS_FIND_ATTEMPTS) {
-            delay(if (attempt == 0) 140L else QUICK_SETTINGS_FIND_DELAY_MS)
-            val node = findQuickSettingsTile(action.label.ifBlank { action.appLabel })
-            if (node != null && clickNodeOrParent(node)) {
-                clicked = true
-                break
-            }
-        }
-        if (!clicked) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            return@withContext ActionExecutionResult(
-                false,
-                "Quick Settings tile is not visible. Add it to the shade first.",
-            )
-        }
-
-        delay(220L)
-        if (findQuickSettingsTile(action.label.ifBlank { action.appLabel }) != null) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
-        }
-        ActionExecutionResult(true, "Quick Settings tile: ${action.label}")
-    }
-
-    private fun findQuickSettingsTile(label: String): AccessibilityNodeInfo? {
-        val target = normalizeAccessibilityText(label)
-        if (target.isBlank()) return null
-        val root = rootInActiveWindow ?: return null
-        return findNode(root, target)
-    }
-
-    private fun findNode(node: AccessibilityNodeInfo, target: String): AccessibilityNodeInfo? {
-        val values = buildList {
-            node.text?.toString()?.let(::add)
-            node.contentDescription?.toString()?.let(::add)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                node.stateDescription?.toString()?.let(::add)
-            }
-        }
-        if (values.any { normalizeAccessibilityText(it).contains(target) }) return node
-        for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
-            findNode(child, target)?.let { return it }
-        }
-        return null
-    }
-
-    private fun clickNodeOrParent(start: AccessibilityNodeInfo): Boolean {
-        var node: AccessibilityNodeInfo? = start
-        repeat(QUICK_SETTINGS_PARENT_DEPTH) {
-            val current = node ?: return false
-            if (current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
-            node = current.parent
-        }
-        return false
-    }
-
-    private fun normalizeAccessibilityText(value: String): String =
-        value.lowercase().replace(Regex("\\s+"), " ").trim()
-
     /**
      * Fallback for ROMs that block direct voice-interaction access. It reproduces the documented
      * Circle to Search gesture at the centre of the navigation handle (or Home button).
@@ -568,9 +492,6 @@ class KeyAccessibilityService : AccessibilityService() {
         const val ESSENTIAL_KEY_SCAN_CODE = 250
         const val LONG_PRESS_MS = 500L
         const val NAVIGATION_LONG_PRESS_MS = 700L
-        const val QUICK_SETTINGS_FIND_ATTEMPTS = 12
-        const val QUICK_SETTINGS_FIND_DELAY_MS = 80L
-        const val QUICK_SETTINGS_PARENT_DEPTH = 7
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
         const val NANOS_PER_MILLISECOND = 1_000_000L

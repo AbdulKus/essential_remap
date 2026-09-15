@@ -885,8 +885,8 @@ private fun AccessibilityStep(
         stepNumber,
         language.t("Enable Essential Remap", "Включите Essential Remap"),
         language.t(
-            "Accessibility receives the Essential Key while Android is in use. Screen content is inspected only when a configured Quick Settings tile must be found and clicked.",
-            "Специальные возможности получают нажатия Essential Key во время работы Android. Содержимое экрана анализируется только при поиске и нажатии настроенной плитки Quick Settings.",
+            "Accessibility lets the app receive the Essential Key while Android is in use. Essential Remap does not read screen content.",
+            "Специальные возможности позволяют приложению получать нажатия Essential Key во время работы Android. Essential Remap не читает содержимое экрана.",
         ),
     )
     Spacer(Modifier.height(22.dp))
@@ -1531,7 +1531,11 @@ private fun ActionChooserDialog(
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
         ActionOption(language.t("Launch Activity", "Запуск Activity"), run = chooseActivity),
-        ActionOption(language.t("Quick Settings tile", "Плитка Quick Settings"), run = chooseQuickSettingsTile),
+        ActionOption(
+            language.t("Quick Settings tile", "Плитка Quick Settings"),
+            language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
+            chooseQuickSettingsTile,
+        ),
         ActionOption("Circle to Search", language.t("Google + Hold handle to search", "Google + удержание полоски для поиска")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
         ActionOption(language.t("Voice assistant", "Голосовой помощник")) { chooseSystem(SystemAction.ASSISTANT) },
         ActionOption(language.t("Flashlight", "Фонарик")) { chooseKind(ActionKind.FLASHLIGHT) },

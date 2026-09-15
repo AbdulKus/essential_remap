@@ -33,12 +33,12 @@ class ActionExecutor(
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
     private val notificationManager = appContext.getSystemService(NotificationManager::class.java)
+    private val shellBridge = (appContext as? EssentialKeyApplication)?.container?.shellBridge
 
     suspend fun execute(
         action: ConfiguredAction,
         performGlobalAction: (Int) -> Boolean,
         performNavigationHandleLongPress: () -> Boolean,
-        performQuickSettingsTile: suspend (ConfiguredAction.QuickSettingsTile) -> ActionExecutionResult,
     ): ActionExecutionResult = when (action) {
         ConfiguredAction.None -> ActionExecutionResult(true, "No action configured")
         is ConfiguredAction.Http -> withContext(Dispatchers.IO) {
@@ -75,7 +75,16 @@ class ActionExecutor(
                 startActivity(intent)
             }
         }
-        is ConfiguredAction.QuickSettingsTile -> performQuickSettingsTile(action)
+        is ConfiguredAction.QuickSettingsTile -> withContext(Dispatchers.IO) {
+            val bridge = shellBridge
+                ?: return@withContext ActionExecutionResult(false, "Sleep monitor is unavailable")
+            bridge.clickQuickSettingsTile(action.componentName).fold(
+                onSuccess = { ActionExecutionResult(true, "Quick Settings tile: ${action.label}") },
+                onFailure = { error ->
+                    ActionExecutionResult(false, error.message ?: "Could not click Quick Settings tile")
+                },
+            )
+        }
         is ConfiguredAction.OpenUrl -> withContext(Dispatchers.Main.immediate) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url)))
         }
