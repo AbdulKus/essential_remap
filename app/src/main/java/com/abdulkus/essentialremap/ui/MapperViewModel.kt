@@ -18,6 +18,7 @@ import com.abdulkus.essentialremap.platform.AccessibilityStatus
 import com.abdulkus.essentialremap.platform.LaunchableActivity
 import com.abdulkus.essentialremap.platform.LaunchableApp
 import com.abdulkus.essentialremap.platform.LaunchableAppsReader
+import com.abdulkus.essentialremap.platform.QuickSettingsTileInfo
 import com.abdulkus.essentialremap.setup.EssentialKeySetupController
 import com.abdulkus.essentialremap.setup.EssentialKeySetupCoordinator
 import com.abdulkus.essentialremap.setup.EssentialKeySetupState
@@ -167,6 +168,8 @@ class MapperViewModel(
                     ConfiguredAction.LaunchApp(it.packageName, it.label)
                 }
                 ?: ConfiguredAction.LaunchApp()
+            ActionKind.QUICK_SETTINGS_TILE -> current as? ConfiguredAction.QuickSettingsTile
+                ?: ConfiguredAction.QuickSettingsTile()
             ActionKind.OPEN_URL -> current as? ConfiguredAction.OpenUrl ?: ConfiguredAction.OpenUrl()
             ActionKind.SYSTEM -> current as? ConfiguredAction.PerformSystemAction
                 ?: ConfiguredAction.PerformSystemAction()
@@ -212,6 +215,17 @@ class MapperViewModel(
                 packageName = activity.packageName,
                 label = label,
                 componentName = activity.componentName,
+            ),
+        )
+    }
+
+    fun updateQuickSettingsTile(gesture: PressAction, tile: QuickSettingsTileInfo) {
+        updateAction(
+            gesture,
+            ConfiguredAction.QuickSettingsTile(
+                componentName = tile.componentName,
+                label = tile.tileLabel,
+                appLabel = tile.appLabel,
             ),
         )
     }
@@ -322,6 +336,7 @@ class MapperViewModel(
         -> null
         is ConfiguredAction.Http -> validateEndpoint(action.endpoint)
         is ConfiguredAction.LaunchApp -> if (action.packageName.isBlank()) "Choose an app" else null
+        is ConfiguredAction.QuickSettingsTile -> if (action.componentName.isBlank()) "Choose a Quick Settings tile" else null
         is ConfiguredAction.OpenUrl -> validateAbsoluteUrl(action.url)
     }
 

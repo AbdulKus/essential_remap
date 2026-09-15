@@ -38,6 +38,7 @@ class ActionExecutor(
         action: ConfiguredAction,
         performGlobalAction: (Int) -> Boolean,
         performNavigationHandleLongPress: () -> Boolean,
+        performQuickSettingsTile: suspend (ConfiguredAction.QuickSettingsTile) -> ActionExecutionResult,
     ): ActionExecutionResult = when (action) {
         ConfiguredAction.None -> ActionExecutionResult(true, "No action configured")
         is ConfiguredAction.Http -> withContext(Dispatchers.IO) {
@@ -74,6 +75,7 @@ class ActionExecutor(
                 startActivity(intent)
             }
         }
+        is ConfiguredAction.QuickSettingsTile -> performQuickSettingsTile(action)
         is ConfiguredAction.OpenUrl -> withContext(Dispatchers.Main.immediate) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url)))
         }

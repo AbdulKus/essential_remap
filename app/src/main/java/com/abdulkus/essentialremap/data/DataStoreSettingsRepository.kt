@@ -90,6 +90,7 @@ private fun writeAction(
     preferences.remove(Keys.actionValue(gesture))
     preferences.remove(Keys.actionLabel(gesture))
     preferences.remove(Keys.actionComponent(gesture))
+    preferences.remove(Keys.actionAppLabel(gesture))
     preferences.remove(Keys.method(gesture))
     preferences.remove(Keys.url(gesture))
     preferences.remove(Keys.actionBaseUrl(gesture))
@@ -109,6 +110,11 @@ private fun writeAction(
             if (action.componentName.isNotBlank()) {
                 preferences[Keys.actionComponent(gesture)] = action.componentName
             }
+        }
+        is ConfiguredAction.QuickSettingsTile -> {
+            preferences[Keys.actionValue(gesture)] = action.componentName
+            preferences[Keys.actionLabel(gesture)] = action.label
+            preferences[Keys.actionAppLabel(gesture)] = action.appLabel
         }
         is ConfiguredAction.OpenUrl -> {
             preferences[Keys.actionValue(gesture)] = action.url.trim()
@@ -193,6 +199,11 @@ private fun readAction(
             label = preferences[Keys.actionLabel(gesture)].orEmpty(),
             componentName = preferences[Keys.actionComponent(gesture)].orEmpty(),
         )
+        ActionKind.QUICK_SETTINGS_TILE -> ConfiguredAction.QuickSettingsTile(
+            componentName = value,
+            label = preferences[Keys.actionLabel(gesture)].orEmpty(),
+            appLabel = preferences[Keys.actionAppLabel(gesture)].orEmpty(),
+        )
         ActionKind.OPEN_URL -> ConfiguredAction.OpenUrl(value)
         ActionKind.SYSTEM -> ConfiguredAction.PerformSystemAction(
             value.toEnumOrDefault(SystemAction.SCREENSHOT),
@@ -218,6 +229,7 @@ private object Keys {
     fun actionValue(action: PressAction) = stringPreferencesKey("${action.name}_action_value")
     fun actionLabel(action: PressAction) = stringPreferencesKey("${action.name}_action_label")
     fun actionComponent(action: PressAction) = stringPreferencesKey("${action.name}_action_component")
+    fun actionAppLabel(action: PressAction) = stringPreferencesKey("${action.name}_action_app_label")
     fun actionBaseUrl(action: PressAction) = stringPreferencesKey("${action.name}_http_base_url")
     fun runWhileLocked(action: PressAction) = booleanPreferencesKey("${action.name}_run_while_locked")
     fun method(action: PressAction) = stringPreferencesKey("${action.name}_method")
