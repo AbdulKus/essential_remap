@@ -18,10 +18,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,13 +100,17 @@ fun QuickSettingsTilePickerDialog(
                                     .padding(horizontal = 18.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                AppIcon(tile.packageName)
-                                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                                Column(Modifier.weight(1f)) {
                                     Text(tile.tileLabel, fontWeight = FontWeight.Medium)
                                     Text(
                                         tile.appLabel,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        tile.componentName.substringAfter('/'),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.labelSmall,
                                     )
                                 }
                                 Text("›", style = MaterialTheme.typography.titleLarge)
