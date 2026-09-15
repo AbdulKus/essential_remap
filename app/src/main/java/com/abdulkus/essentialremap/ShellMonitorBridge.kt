@@ -169,7 +169,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
             if (!sent) {
                 Result.failure(IllegalStateException("Could not send command to sleep monitor"))
             } else {
-                withTimeoutOrNull(2_000L) { reply.await() }
+                withTimeoutOrNull(4_000L) { reply.await() }
                     ?: Result.failure(IllegalStateException("Sleep monitor did not answer the tile command"))
             }
         } finally {
