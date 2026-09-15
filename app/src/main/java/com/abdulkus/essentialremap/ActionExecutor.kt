@@ -2,12 +2,13 @@ package com.abdulkus.essentialremap
 
 import android.accessibilityservice.AccessibilityService
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
-import android.provider.MediaStore
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
 import android.view.KeyEvent
 import com.abdulkus.essentialremap.domain.ActionUrlResolver
 import com.abdulkus.essentialremap.domain.ConfiguredAction
@@ -66,6 +67,11 @@ class ActionExecutor(
             val intent = appContext.packageManager.getLaunchIntentForPackage(action.packageName)
                 ?: return@withContext ActionExecutionResult(false, "Selected app is not installed")
             startActivity(intent)
+        }
+        is ConfiguredAction.LaunchActivity -> withContext(Dispatchers.Main.immediate) {
+            val component = ComponentName.unflattenFromString(action.componentName)
+                ?: return@withContext ActionExecutionResult(false, "Selected app action is invalid")
+            startActivity(Intent().setComponent(component))
         }
         is ConfiguredAction.OpenUrl -> withContext(Dispatchers.Main.immediate) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url)))
