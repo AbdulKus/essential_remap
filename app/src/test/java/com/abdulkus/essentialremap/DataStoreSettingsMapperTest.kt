@@ -56,9 +56,10 @@ class DataStoreSettingsMapperTest {
             stringPreferencesKey("SINGLE_action_type") to "HTTP",
             stringPreferencesKey("SINGLE_action_value") to "/single",
             stringPreferencesKey("SINGLE_http_base_url") to "https://single.example",
-            stringPreferencesKey("LONG_action_type") to "LAUNCH_ACTIVITY",
-            stringPreferencesKey("LONG_action_value") to "com.example.vpn/.ToggleActivity",
+            stringPreferencesKey("LONG_action_type") to "LAUNCH_APP",
+            stringPreferencesKey("LONG_action_value") to "com.example.vpn",
             stringPreferencesKey("LONG_action_label") to "Example VPN — Toggle",
+            stringPreferencesKey("LONG_action_component") to "com.example.vpn/.ToggleActivity",
         )
 
         val settings = preferencesToSettings(preferences)
@@ -72,9 +73,10 @@ class DataStoreSettingsMapperTest {
             settings.actions.getValue(PressAction.SINGLE),
         )
         assertEquals(
-            ConfiguredAction.LaunchActivity(
-                componentName = "com.example.vpn/.ToggleActivity",
+            ConfiguredAction.LaunchApp(
+                packageName = "com.example.vpn",
                 label = "Example VPN — Toggle",
+                componentName = "com.example.vpn/.ToggleActivity",
             ),
             settings.actions.getValue(PressAction.LONG),
         )
