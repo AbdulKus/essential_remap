@@ -71,14 +71,18 @@ class MainActivity : ComponentActivity() {
         if (operation != null) {
             if (!granted) {
                 val language = userPreferences.language ?: AppLanguage.ENGLISH
-                Toast.makeText(
-                    this,
+                val warning = if (userPreferences.setupAccessMode == SetupAccessMode.ROOT) {
+                    language.translate(
+                        "Without notifications, Essential Remap cannot warn you if root monitor auto-start fails after reboot",
+                        "Без уведомлений Essential Remap не сможет предупредить, если автозапуск root-монитора после перезагрузки не сработает",
+                    )
+                } else {
                     language.translate(
                         "Without notifications, enter a pairing code after returning to the app",
                         "Без уведомлений код сопряжения придётся вводить после возврата в приложение",
-                    ),
-                    Toast.LENGTH_LONG,
-                ).show()
+                    )
+                }
+                Toast.makeText(this, warning, Toast.LENGTH_LONG).show()
             }
             startPackageSetup(operation)
         }
@@ -276,9 +280,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun beginPackageSetup(operation: PackageOperation) {
-        val accessMode = userPreferences.setupAccessMode
-        if (accessMode == SetupAccessMode.NON_ROOT &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             pendingPackageOperation = operation
