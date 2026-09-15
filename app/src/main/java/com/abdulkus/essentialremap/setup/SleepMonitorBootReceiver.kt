@@ -49,7 +49,11 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
                 check(output.contains(ShellKeyMonitorCommands.START_CONFIRMATION)) {
                     "Root boot monitor did not confirm startup"
                 }
-                ScreenOffKeyAccess.markStarted(context)
+                RootCommandExecutor.execute(
+                    ShellKeyMonitorCommands.handoffFilesToShell,
+                    ROOT_BOOT_COMMAND_TIMEOUT_MS,
+                )
+                ScreenOffKeyAccess.markStarted(context, SetupAccessMode.ROOT)
                 cancelReminder(context)
                 (context.applicationContext as? EssentialKeyApplication)?.container?.shellBridge?.requestConnect()
                 diagnostics.log("Boot: root sleep monitor started")

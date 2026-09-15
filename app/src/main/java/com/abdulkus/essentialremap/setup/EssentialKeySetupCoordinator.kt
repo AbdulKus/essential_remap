@@ -136,6 +136,7 @@ class EssentialKeySetupCoordinator(
                 if (accessMode == SetupAccessMode.ROOT) {
                     applyRootOperation(operation)
                 } else {
+                    prepareNonRootTransition()
                     val existingManager = connectUsingStoredIdentity()
                     if (existingManager != null) {
                         diagnostics.log("Using previously paired ADB identity")
@@ -351,7 +352,7 @@ class EssentialKeySetupCoordinator(
                     withTimeout(4_000) {
                         while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
                     }
-                    ScreenOffKeyAccess.markStarted(appContext)
+                    ScreenOffKeyAccess.markStarted(appContext, SetupAccessMode.NON_ROOT)
                     SleepMonitorBootReceiver.cancelReminder(appContext)
                     true
                 }
@@ -435,7 +436,7 @@ class EssentialKeySetupCoordinator(
                 withTimeout(5_000) {
                     while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
                 }
-                ScreenOffKeyAccess.markStarted(appContext)
+                ScreenOffKeyAccess.markStarted(appContext, SetupAccessMode.ROOT)
                 SleepMonitorBootReceiver.cancelReminder(appContext)
                 true
             }
@@ -486,7 +487,24 @@ class EssentialKeySetupCoordinator(
             ShellKeyMonitorCommands.stop ->
                 check(output.contains(ShellKeyMonitorCommands.STOP_OK)) { "Root sleep monitor did not confirm shutdown" }
         }
+        if (command == ShellKeyMonitorCommands.INSTALL) {
+            RootCommandExecutor.execute(ShellKeyMonitorCommands.handoffFilesToShell, ROOT_COMMAND_TIMEOUT_MS)
+            diagnostics.log("Root monitor artifacts handed off to shell ownership")
+        }
         return output
+    }
+
+    private fun prepareNonRootTransition() {
+        if (ScreenOffKeyAccess.configuredAccessMode(appContext) != SetupAccessMode.ROOT) return
+        diagnostics.log("Switching ROOT monitor to NON_ROOT: requesting one final root cleanup")
+        RootCommandExecutor.requireRoot()
+        val stopOutput = RootCommandExecutor.execute(ShellKeyMonitorCommands.stop, ROOT_COMMAND_TIMEOUT_MS)
+        check(stopOutput.contains(ShellKeyMonitorCommands.STOP_OK)) {
+            "Could not stop the existing root sleep monitor before switching to non-root mode"
+        }
+        RootCommandExecutor.execute(ShellKeyMonitorCommands.handoffFilesToShell, ROOT_COMMAND_TIMEOUT_MS)
+        ScreenOffKeyAccess.markStopped(appContext)
+        diagnostics.log("ROOT monitor stopped and files handed back to shell")
     }
 
     private fun verifyScreenOffAccessRoot() {
