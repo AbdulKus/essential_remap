@@ -1,0 +1,113 @@
+name: Apply Quick Settings listening cycle patch
+
+on:
+  push:
+    branches: [fix/qs-tile-listening-cycle]
+    paths: [.github/workflows/apply-qs-listening-cycle.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/qs-tile-listening-cycle
+      - name: Apply source patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected exactly one match in {path}, got {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              "public static final int STATE_REVISION = 10;",
+              "public static final int STATE_REVISION = 11;",
+          )
+
+          old = '''            thread("essential-tile", () -> {
+                try {
+                    command(1_500, "/system/bin/cmd", "statusbar", "click-tile", normalized);
+                    sendControl("TILE_RESULT " + requestId + " OK");
+                    log("tile click component=" + normalized + " result=ok");
+                } catch (Exception error) {
+                    String detail = error.getMessage();
+                    if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
+                    detail = detail.replace('\\n', ' ').replace('\\r', ' ');
+                    sendControl("TILE_RESULT " + requestId + " ERR " + detail);
+                    log("tile click component=" + normalized + " result=error " + detail);
+                }
+            });'''
+          new = '''            thread("essential-tile", () -> {
+                String resultLine;
+                try {
+                    // Some TileService implementations (including Amnezia VPN) only bind to their
+                    // backing service from onStartListening(). Briefly entering Quick Settings before
+                    // click-tile reproduces the lifecycle of a real user tap without text/coordinate UI automation.
+                    log("tile prepare component=" + normalized + " stage=expand");
+                    command(1_000, "/system/bin/cmd", "statusbar", "expand-settings");
+                    SystemClock.sleep(350L);
+                    log("tile prepare component=" + normalized + " stage=click");
+                    command(1_500, "/system/bin/cmd", "statusbar", "click-tile", normalized);
+                    // Let onClick finish before collapse triggers onStopListening()/unbindService().
+                    SystemClock.sleep(120L);
+                    resultLine = "TILE_RESULT " + requestId + " OK";
+                    log("tile click component=" + normalized + " result=ok");
+                } catch (Exception error) {
+                    String detail = error.getMessage();
+                    if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
+                    detail = detail.replace('\\n', ' ').replace('\\r', ' ');
+                    resultLine = "TILE_RESULT " + requestId + " ERR " + detail;
+                    log("tile click component=" + normalized + " result=error " + detail);
+                } finally {
+                    try {
+                        command(1_000, "/system/bin/cmd", "statusbar", "collapse");
+                        log("tile prepare component=" + normalized + " stage=collapse");
+                    } catch (Exception collapseError) {
+                        log("tile collapse component=" + normalized + " result=error " + collapseError.getClass().getSimpleName());
+                    }
+                }
+                sendControl(resultLine);
+            });'''
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              old,
+              new,
+          )
+
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt",
+              "const val REVISION = 10",
+              "const val REVISION = 11",
+          )
+
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ShellMonitorBridge.kt",
+              "withTimeoutOrNull(2_000L) { reply.await() }",
+              "withTimeoutOrNull(4_000L) { reply.await() }",
+          )
+
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/QuickSettingsTilePicker.kt",
+              '''                                "Uses the running sleep monitor to trigger the exact tile directly. Quick Settings will not open.",
+                                "Используется запущенный монитор сна: нужная плитка срабатывает напрямую, без открытия шторки.",''',
+              '''                                "Uses the sleep monitor to briefly prepare Quick Settings and trigger the exact tile reliably.",
+                                "Монитор сна кратко подготавливает Quick Settings и надёжно вызывает именно выбранную плитку.",''',
+          )
+
+          Path(".github/workflows/apply-qs-listening-cycle.yml").unlink()
+      - name: Commit patched source
+        run: |
+          git config user.name "free_vibrancy"
+          git config user.email "73951988+AbdulKus@users.noreply.github.com"
+          git add -A
+          git commit -m "Prepare Quick Settings before tile clicks"
+          git push origin HEAD:fix/qs-tile-listening-cycle
