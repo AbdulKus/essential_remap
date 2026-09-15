@@ -106,6 +106,10 @@ private fun writeAction(
             preferences[Keys.actionValue(gesture)] = action.packageName
             preferences[Keys.actionLabel(gesture)] = action.label
         }
+        is ConfiguredAction.LaunchActivity -> {
+            preferences[Keys.actionValue(gesture)] = action.componentName
+            preferences[Keys.actionLabel(gesture)] = action.label
+        }
         is ConfiguredAction.OpenUrl -> {
             preferences[Keys.actionValue(gesture)] = action.url.trim()
         }
@@ -186,6 +190,10 @@ private fun readAction(
         ActionKind.TOGGLE_SILENT -> ConfiguredAction.SetSoundMode(SoundMode.TOGGLE_SILENT_NORMAL)
         ActionKind.LAUNCH_APP -> ConfiguredAction.LaunchApp(
             packageName = value,
+            label = preferences[Keys.actionLabel(gesture)].orEmpty(),
+        )
+        ActionKind.LAUNCH_ACTIVITY -> ConfiguredAction.LaunchActivity(
+            componentName = value,
             label = preferences[Keys.actionLabel(gesture)].orEmpty(),
         )
         ActionKind.OPEN_URL -> ConfiguredAction.OpenUrl(value)
