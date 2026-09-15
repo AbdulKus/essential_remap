@@ -15,6 +15,7 @@ import com.abdulkus.essentialremap.domain.SystemAction
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import com.abdulkus.essentialremap.haptics.HapticResult
 import com.abdulkus.essentialremap.platform.AccessibilityStatus
+import com.abdulkus.essentialremap.platform.LaunchableActivity
 import com.abdulkus.essentialremap.platform.LaunchableApp
 import com.abdulkus.essentialremap.platform.LaunchableAppsReader
 import com.abdulkus.essentialremap.setup.EssentialKeySetupController
@@ -201,6 +202,18 @@ class MapperViewModel(
 
     fun updateLaunchApp(gesture: PressAction, app: LaunchableApp) {
         updateAction(gesture, ConfiguredAction.LaunchApp(app.packageName, app.label))
+    }
+
+    fun updateLaunchActivity(gesture: PressAction, activity: LaunchableActivity) {
+        val label = "${activity.appLabel} — ${activity.activityLabel}"
+        updateAction(
+            gesture,
+            ConfiguredAction.LaunchApp(
+                packageName = activity.packageName,
+                label = label,
+                componentName = activity.componentName,
+            ),
+        )
     }
 
     fun updateHaptic(strength: HapticStrength) {

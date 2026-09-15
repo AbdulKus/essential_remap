@@ -87,6 +87,7 @@ sealed interface ConfiguredAction {
     data class LaunchApp(
         val packageName: String = "",
         val label: String = "",
+        val componentName: String = "",
     ) : ConfiguredAction {
         override val kind = ActionKind.LAUNCH_APP
     }
