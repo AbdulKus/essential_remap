@@ -12,6 +12,11 @@ class SetupAccessModeTest {
     }
 
     @Test
+    fun storedNonRootModeIsRestored() {
+        assertEquals(SetupAccessMode.NON_ROOT, SetupAccessMode.fromStored("NON_ROOT"))
+    }
+
+    @Test
     fun storedRootModeIsRestored() {
         assertEquals(SetupAccessMode.ROOT, SetupAccessMode.fromStored("ROOT"))
     }
