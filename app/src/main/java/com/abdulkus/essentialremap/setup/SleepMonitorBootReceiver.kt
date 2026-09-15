@@ -25,8 +25,10 @@ class SleepMonitorBootReceiver : BroadcastReceiver() {
         val preferences = UserPreferences(context)
         if (!preferences.screenOffEnabled) return
 
+        val configuredAccessMode =
+            ScreenOffKeyAccess.configuredAccessMode(context) ?: preferences.setupAccessMode
         ScreenOffKeyAccess.markStopped(context)
-        if (preferences.setupAccessMode != SetupAccessMode.ROOT) {
+        if (configuredAccessMode != SetupAccessMode.ROOT) {
             postReminder(context, preferences.language, rootMode = false)
             return
         }

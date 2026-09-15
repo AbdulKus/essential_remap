@@ -78,6 +78,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.abdulkus.essentialremap.ScreenOffKeyAccess
 import com.abdulkus.essentialremap.domain.ActionKind
 import com.abdulkus.essentialremap.domain.ConfiguredAction
 import com.abdulkus.essentialremap.domain.HapticStrength
@@ -345,7 +346,7 @@ private fun OnboardingScreen(
     var page by rememberSaveable { mutableStateOf(0) }
     var pairingCode by rememberSaveable { mutableStateOf("") }
     val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
-    val screenOffReady = state.setup.screenOffAccessGranted
+    val screenOffReady = screenOffReadyForMode(state, setupAccessMode)
     val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
     val needsUsbStep = screenOffEnabled && setupAccessMode == SetupAccessMode.NON_ROOT
     val basePage = if (needsUsbStep) 4 else 3
@@ -1053,6 +1054,7 @@ private fun SleepSetupStep(
     stepNumber: String,
 ) {
     val rootMode = setupAccessMode == SetupAccessMode.ROOT
+    val monitorReady = screenOffReadyForMode(state, setupAccessMode)
     StepHeading(
         stepNumber,
         language.t("Enable screen-off handling", "Включите работу с выключенным экраном"),
@@ -1070,8 +1072,8 @@ private fun SleepSetupStep(
     )
     Spacer(Modifier.height(22.dp))
     StatusCard(
-        success = state.setup.screenOffAccessGranted,
-        title = if (state.setup.screenOffAccessGranted) {
+        success = monitorReady,
+        title = if (monitorReady) {
             language.t("Sleep monitor is running", "Монитор сна работает")
         } else {
             language.t("Sleep monitor is not running", "Монитор сна не запущен")
@@ -1101,7 +1103,7 @@ private fun SleepSetupStep(
             clearDiagnostics,
         )
     }
-    if (!state.setup.screenOffAccessGranted && !state.setup.busy) {
+    if (!monitorReady && !state.setup.busy) {
         Button(
             onClick = { beginPackageSetup(PackageOperation.INSTALL_SLEEP_MONITOR) },
             modifier = Modifier.fillMaxWidth(),
@@ -1153,6 +1155,13 @@ private fun StepHeading(number: String, title: String, detail: String) {
     Text(number, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
     Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = 8.dp))
     Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp), lineHeight = 21.sp)
+}
+
+@Composable
+private fun screenOffReadyForMode(state: MapperUiState, setupAccessMode: SetupAccessMode): Boolean {
+    val context = LocalContext.current
+    return state.setup.screenOffAccessGranted &&
+        ScreenOffKeyAccess.isGrantedFor(context, setupAccessMode)
 }
 
 @Composable
@@ -1346,8 +1355,9 @@ private fun HomeScreen(
     var httpGesture by remember { mutableStateOf<PressAction?>(null) }
     var soundGesture by remember { mutableStateOf<PressAction?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(initiallyOpenSettings) }
+    val monitorReady = screenOffReadyForMode(state, setupAccessMode)
     val baseSetupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()
-    val screenOffReady = !screenOffEnabled || state.setup.screenOffAccessGranted
+    val screenOffReady = !screenOffEnabled || monitorReady
     val setupReady = baseSetupReady && screenOffReady
     val ready = setupReady && state.settings.remappingEnabled
 
@@ -1443,7 +1453,7 @@ private fun HomeScreen(
                         action = openAccessibilitySettings,
                     )
                 }
-                screenOffEnabled && !state.setup.screenOffAccessGranted -> item {
+                screenOffEnabled && !monitorReady -> item {
                     WarningCard(
                         text = language.t(
                             "Sleep monitor is not running",
@@ -1894,6 +1904,7 @@ private fun SettingsDialog(
     setRemappingEnabled: (Boolean) -> Unit,
 ) {
     var pairingCode by rememberSaveable { mutableStateOf("") }
+    val monitorReady = screenOffReadyForMode(state, setupAccessMode)
     Dialog(
         onDismissRequest = dismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -1916,8 +1927,8 @@ private fun SettingsDialog(
                     )
                     if (screenOffEnabled) {
                         StatusCard(
-                            state.setup.screenOffAccessGranted,
-                            if (state.setup.screenOffAccessGranted) {
+                            monitorReady,
+                            if (monitorReady) {
                                 language.t("Sleep monitor is running", "Монитор сна работает")
                             } else {
                                 language.t("Sleep monitor needs restart", "Монитор сна нужно перезапустить")
@@ -1963,7 +1974,7 @@ private fun SettingsDialog(
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                                     ) {
                                         Text(
-                                            if (state.setup.screenOffAccessGranted) {
+                                            if (monitorReady) {
                                                 language.t("RESTART", "ПЕРЕЗАПУСК")
                                             } else {
                                                 language.t("START", "ЗАПУСТИТЬ")

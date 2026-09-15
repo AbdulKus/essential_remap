@@ -31,6 +31,9 @@ object ScreenOffKeyAccess {
         return runtimeHealthy && isConfiguredForThisBoot(context)
     }
 
+    fun isGrantedFor(context: Context, accessMode: SetupAccessMode): Boolean =
+        isGranted(context) && configuredAccessMode(context) == accessMode
+
     fun isConfiguredForThisBoot(context: Context): Boolean {
         val preferences = preferences(context)
         return preferences.getBoolean(KEY_STARTED, false) &&
