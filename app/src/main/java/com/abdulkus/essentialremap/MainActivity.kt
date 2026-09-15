@@ -23,6 +23,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.abdulkus.essentialremap.platform.AccessibilityStatusReader
 import com.abdulkus.essentialremap.setup.PackageOperation
+import com.abdulkus.essentialremap.setup.SetupAccessMode
 import com.abdulkus.essentialremap.ui.AppLanguage
 import com.abdulkus.essentialremap.ui.EssentialRemapApp
 import com.abdulkus.essentialremap.ui.EssentialRemapTheme
@@ -70,16 +71,20 @@ class MainActivity : ComponentActivity() {
         if (operation != null) {
             if (!granted) {
                 val language = userPreferences.language ?: AppLanguage.ENGLISH
-                Toast.makeText(
-                    this,
+                val warning = if (userPreferences.setupAccessMode == SetupAccessMode.ROOT) {
+                    language.translate(
+                        "Without notifications, Essential Remap cannot warn you if root monitor auto-start fails after reboot",
+                        "Без уведомлений Essential Remap не сможет предупредить, если автозапуск root-монитора после перезагрузки не сработает",
+                    )
+                } else {
                     language.translate(
                         "Without notifications, enter a pairing code after returning to the app",
                         "Без уведомлений код сопряжения придётся вводить после возврата в приложение",
-                    ),
-                    Toast.LENGTH_LONG,
-                ).show()
+                    )
+                }
+                Toast.makeText(this, warning, Toast.LENGTH_LONG).show()
             }
-            startWirelessSetup(operation)
+            startPackageSetup(operation)
         }
     }
 
@@ -282,13 +287,11 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        startWirelessSetup(operation)
+        startPackageSetup(operation)
     }
 
-    private fun startWirelessSetup(operation: PackageOperation) {
-        // The coordinator first tries the persisted ADB identity. It opens Wireless debugging
-        // settings only when the service is unavailable or pairing is actually required.
-        viewModel.startPackageSetup(operation)
+    private fun startPackageSetup(operation: PackageOperation) {
+        viewModel.startPackageSetup(operation, userPreferences.setupAccessMode)
     }
 
     private fun openWirelessDebuggingSetup() {

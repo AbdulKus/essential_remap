@@ -38,6 +38,7 @@ import kotlinx.coroutines.withTimeout
 
 enum class SetupPhase {
     IDLE,
+    REQUESTING_ROOT,
     DISCOVERING,
     WAITING_FOR_WIRELESS_DEBUGGING,
     WAITING_FOR_CODE,
@@ -51,11 +52,13 @@ enum class SetupPhase {
 data class EssentialKeySetupState(
     val packageStatus: NothingPackageStatus = NothingPackageStatus.UNKNOWN,
     val screenOffAccessGranted: Boolean = false,
+    val accessMode: SetupAccessMode = SetupAccessMode.NON_ROOT,
     val phase: SetupPhase = SetupPhase.IDLE,
     val operation: PackageOperation? = null,
     val message: String? = null,
 ) {
     val busy: Boolean get() = phase in setOf(
+        SetupPhase.REQUESTING_ROOT,
         SetupPhase.DISCOVERING,
         SetupPhase.WAITING_FOR_WIRELESS_DEBUGGING,
         SetupPhase.WAITING_FOR_CODE,
@@ -68,7 +71,7 @@ data class EssentialKeySetupState(
 interface EssentialKeySetupController {
     val state: StateFlow<EssentialKeySetupState>
     fun refresh()
-    fun start(operation: PackageOperation)
+    fun start(operation: PackageOperation, accessMode: SetupAccessMode)
     fun submitPairingCode(code: String)
     fun cancel()
     fun diagnosticReport(): String
@@ -112,28 +115,35 @@ class EssentialKeySetupCoordinator(
         )
     }
 
-    override fun start(operation: PackageOperation) {
+    override fun start(operation: PackageOperation, accessMode: SetupAccessMode) {
         setupJob?.cancel()
         pairingCode = CompletableDeferred()
         _state.value = EssentialKeySetupState(
             packageStatus = statusReader.read(),
             screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
-            phase = SetupPhase.DISCOVERING,
+            accessMode = accessMode,
+            phase = if (accessMode == SetupAccessMode.ROOT) SetupPhase.REQUESTING_ROOT else SetupPhase.DISCOVERING,
             operation = operation,
-            message = text(
-                "Connecting to Wireless debugging…",
-                "Подключаемся к Wireless debugging…",
-            ),
+            message = if (accessMode == SetupAccessMode.ROOT) {
+                text("Requesting root access…", "Запрашиваем root-доступ…")
+            } else {
+                text("Connecting to Wireless debugging…", "Подключаемся к Wireless debugging…")
+            },
         )
-        diagnostics.log("--- Setup started: operation=$operation packageStatus=${_state.value.packageStatus} ---")
+        diagnostics.log("--- Setup started: operation=$operation accessMode=$accessMode packageStatus=${_state.value.packageStatus} ---")
         setupJob = scope.launch {
             runCatching {
-                val existingManager = connectUsingStoredIdentity()
-                if (existingManager != null) {
-                    diagnostics.log("Using previously paired ADB identity")
-                    applyConnectedOperation(existingManager, operation)
+                if (accessMode == SetupAccessMode.ROOT) {
+                    applyRootOperation(operation)
                 } else {
-                    pairThenApply(operation)
+                    prepareNonRootTransition()
+                    val existingManager = connectUsingStoredIdentity()
+                    if (existingManager != null) {
+                        diagnostics.log("Using previously paired ADB identity")
+                        applyConnectedOperation(existingManager, operation)
+                    } else {
+                        pairThenApply(operation)
+                    }
                 }
             }.onFailure { error ->
                 if (error is kotlinx.coroutines.CancellationException) return@onFailure
@@ -175,6 +185,7 @@ class EssentialKeySetupCoordinator(
         _state.value = EssentialKeySetupState(
             packageStatus = statusReader.read(),
             screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+            accessMode = _state.value.accessMode,
         )
     }
 
@@ -341,7 +352,7 @@ class EssentialKeySetupCoordinator(
                     withTimeout(4_000) {
                         while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
                     }
-                    ScreenOffKeyAccess.markStarted(appContext)
+                    ScreenOffKeyAccess.markStarted(appContext, SetupAccessMode.NON_ROOT)
                     SleepMonitorBootReceiver.cancelReminder(appContext)
                     true
                 }
@@ -352,6 +363,7 @@ class EssentialKeySetupCoordinator(
             _state.value = EssentialKeySetupState(
                 packageStatus = packageStatus,
                 screenOffAccessGranted = screenOffAccessGranted,
+                accessMode = SetupAccessMode.NON_ROOT,
                 phase = SetupPhase.COMPLETE,
                 operation = operation,
                 message = when (operation) {
@@ -383,6 +395,142 @@ class EssentialKeySetupCoordinator(
         } finally {
             runCatching { connectedManager.disconnect() }
         }
+    }
+
+    private suspend fun applyRootOperation(operation: PackageOperation) {
+        _state.value = _state.value.copy(
+            phase = SetupPhase.REQUESTING_ROOT,
+            message = text(
+                "Allow Essential Remap in your root manager to continue.",
+                "Разрешите Essential Remap root-доступ в менеджере root.",
+            ),
+        )
+        postProgressNotification()
+        diagnostics.log("Root setup: requesting su access")
+        RootCommandExecutor.requireRoot()
+        diagnostics.log("Root setup: su access granted")
+
+        _state.value = _state.value.copy(
+            phase = SetupPhase.APPLYING,
+            message = when (operation) {
+                PackageOperation.DISABLE -> text("Releasing Essential Key with root", "Освобождаем Essential Key через root")
+                PackageOperation.INSTALL_SLEEP_MONITOR -> text("Starting root sleep monitor", "Запускаем root-монитор сна")
+                PackageOperation.RESTORE -> text("Restoring Essential Space with root", "Восстанавливаем Essential Space через root")
+            },
+        )
+        postProgressNotification()
+
+        EssentialKeySetupCommands.commands(operation).forEach { command ->
+            diagnostics.log("Executing root setup command: $command")
+            val output = executeRootSetupCommand(command)
+            diagnostics.log("Root command output: ${output.take(MAX_LOG_OUTPUT_CHARS)}")
+        }
+        if (operation == PackageOperation.RESTORE) ScreenOffKeyAccess.markStopped(appContext)
+
+        val packageStatus = verifyPackageStateRoot(operation)
+        val screenOffAccessGranted = when (operation) {
+            PackageOperation.INSTALL_SLEEP_MONITOR -> {
+                verifyScreenOffAccessRoot()
+                val bridge = (appContext as EssentialKeyApplication).container.shellBridge
+                bridge.requestConnect()
+                withTimeout(5_000) {
+                    while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
+                }
+                ScreenOffKeyAccess.markStarted(appContext, SetupAccessMode.ROOT)
+                SleepMonitorBootReceiver.cancelReminder(appContext)
+                true
+            }
+            PackageOperation.DISABLE -> ScreenOffKeyAccess.isGranted(appContext)
+            PackageOperation.RESTORE -> false
+        }
+
+        diagnostics.log("Root operation verified: status=$packageStatus screenOff=$screenOffAccessGranted")
+        _state.value = EssentialKeySetupState(
+            packageStatus = packageStatus,
+            screenOffAccessGranted = screenOffAccessGranted,
+            accessMode = SetupAccessMode.ROOT,
+            phase = SetupPhase.COMPLETE,
+            operation = operation,
+            message = when (operation) {
+                PackageOperation.DISABLE -> text(
+                    "Essential Key released with root. ADB and Developer options are not required.",
+                    "Essential Key освобождена через root. ADB и режим разработчика не требуются.",
+                )
+                PackageOperation.INSTALL_SLEEP_MONITOR -> text(
+                    "Root sleep monitor started. ADB can stay off; it will start automatically after a phone reboot.",
+                    "Root-монитор сна запущен. ADB можно оставить выключенным; после перезагрузки он запустится автоматически.",
+                )
+                PackageOperation.RESTORE -> text(
+                    "Essential Space restored. Root is no longer needed for Essential Remap.",
+                    "Essential Space восстановлен. Root больше не нужен Essential Remap.",
+                )
+            },
+        )
+        val successMessage = _state.value.message.orEmpty()
+        ScreenOffKeyAccess.notifyChanged()
+        postResultNotification(text("Setup complete", "Настройка завершена"), successMessage)
+        returnToApp()
+    }
+
+    private fun executeRootSetupCommand(command: String): String {
+        require(EssentialKeySetupCommands.isAllowlisted(command)) { "Command is not allowlisted" }
+        val actualCommand = if (command == ShellKeyMonitorCommands.INSTALL) ShellKeyMonitorCommands.installAndStart else command
+        val output = RootCommandExecutor.execute(
+            actualCommand,
+            if (command == ShellKeyMonitorCommands.INSTALL) ROOT_MONITOR_TIMEOUT_MS else ROOT_COMMAND_TIMEOUT_MS,
+        )
+        when (command) {
+            EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH ->
+                check(output.contains(EssentialKeySetupCommands.COMMAND_OK)) { "Root could not configure screen-off dispatch" }
+            ShellKeyMonitorCommands.INSTALL ->
+                check(output.contains(ShellKeyMonitorCommands.START_CONFIRMATION)) { "Root sleep monitor did not confirm startup" }
+            ShellKeyMonitorCommands.stop ->
+                check(output.contains(ShellKeyMonitorCommands.STOP_OK)) { "Root sleep monitor did not confirm shutdown" }
+        }
+        if (command == ShellKeyMonitorCommands.INSTALL) {
+            RootCommandExecutor.execute(ShellKeyMonitorCommands.handoffFilesToShell, ROOT_COMMAND_TIMEOUT_MS)
+            diagnostics.log("Root monitor artifacts handed off to shell ownership")
+        }
+        return output
+    }
+
+    private fun prepareNonRootTransition() {
+        if (ScreenOffKeyAccess.configuredAccessMode(appContext) != SetupAccessMode.ROOT) return
+        diagnostics.log("Switching ROOT monitor to NON_ROOT: requesting one final root cleanup")
+        RootCommandExecutor.requireRoot()
+        val stopOutput = RootCommandExecutor.execute(ShellKeyMonitorCommands.stop, ROOT_COMMAND_TIMEOUT_MS)
+        check(stopOutput.contains(ShellKeyMonitorCommands.STOP_OK)) {
+            "Could not stop the existing root sleep monitor before switching to non-root mode"
+        }
+        RootCommandExecutor.execute(ShellKeyMonitorCommands.handoffFilesToShell, ROOT_COMMAND_TIMEOUT_MS)
+        ScreenOffKeyAccess.markStopped(appContext)
+        diagnostics.log("ROOT monitor stopped and files handed back to shell")
+    }
+
+    private fun verifyScreenOffAccessRoot() {
+        val setting = RootCommandExecutor.execute(
+            EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
+            ROOT_COMMAND_TIMEOUT_MS,
+        )
+        check(setting.lineSequence().any { it.trim() == "1" }) {
+            "Android did not block the OEM Essential Key screen-off wake path"
+        }
+        val monitor = RootCommandExecutor.execute(ShellKeyMonitorCommands.status, ROOT_COMMAND_TIMEOUT_MS)
+        check(monitor.contains(ShellKeyMonitorCommands.RUNNING_CONFIRMATION)) {
+            "Android did not keep the root key monitor running"
+        }
+        diagnostics.log("Screen-off access verified: root monitor running, nt_block_essential_key=1")
+    }
+
+    private fun verifyPackageStateRoot(operation: PackageOperation): NothingPackageStatus {
+        val flag = if (operation == PackageOperation.RESTORE) "-e" else "-d"
+        NothingPackageCommands.packages.forEach { packageName ->
+            val output = RootCommandExecutor.execute("pm list packages $flag $packageName", ROOT_COMMAND_TIMEOUT_MS)
+            check(output.lineSequence().any { it.trim() == "package:$packageName" }) {
+                "Android could not verify package state for $packageName"
+            }
+        }
+        return if (operation == PackageOperation.RESTORE) NothingPackageStatus.ENABLED else NothingPackageStatus.DISABLED
     }
 
     private fun pairWithFallback(endpoint: AdbEndpoint, code: String) {
@@ -739,18 +887,25 @@ class EssentialKeySetupCoordinator(
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                text("Wireless debugging setup", "Настройка Wireless debugging"),
+                text("Essential Remap setup", "Настройка Essential Remap"),
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = text(
-                    "Accepts the local ADB pairing code during Essential Remap setup",
-                    "Принимает локальный код сопряжения ADB при настройке Essential Remap",
+                    "Shows setup progress and accepts a local ADB pairing code in non-root mode",
+                    "Показывает ход настройки и принимает локальный код ADB в режиме без root",
                 )
             },
         )
     }
 
     private fun friendlyError(error: Throwable): String = when {
+        _state.value.accessMode == SetupAccessMode.ROOT &&
+            (error.message?.contains("root", ignoreCase = true) == true ||
+                error.message?.contains("su", ignoreCase = true) == true) ->
+            text(
+                "Root access failed. Allow Essential Remap in Magisk, KernelSU, APatch or your root manager and try again.",
+                "Не удалось получить root. Разрешите Essential Remap в Magisk, KernelSU, APatch или другом менеджере root и попробуйте снова.",
+            )
         error is kotlinx.coroutines.TimeoutCancellationException ->
             text(
                 "Wireless debugging timed out. Keep it enabled and try again.",
@@ -793,6 +948,8 @@ class EssentialKeySetupCoordinator(
         private const val SAVED_KEY_WAIT_DELAY_MS = 750L
         private const val LOOPBACK_HOST = "127.0.0.1"
         private const val COMMAND_TIMEOUT_MS = 15_000L
+        private const val ROOT_COMMAND_TIMEOUT_MS = 10_000L
+        private const val ROOT_MONITOR_TIMEOUT_MS = 20_000L
         private const val SHELL_POLL_INTERVAL_MS = 25L
         private const val SHELL_WRITE_CHUNK_BYTES = 1_024
         private const val MAX_LOG_OUTPUT_CHARS = 2_000

@@ -24,6 +24,7 @@ import com.abdulkus.essentialremap.setup.EssentialKeySetupCoordinator
 import com.abdulkus.essentialremap.setup.EssentialKeySetupState
 import com.abdulkus.essentialremap.setup.NothingPackageStatus
 import com.abdulkus.essentialremap.setup.PackageOperation
+import com.abdulkus.essentialremap.setup.SetupAccessMode
 import java.net.URI
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -129,8 +130,8 @@ class MapperViewModel(
         _uiState.update { it.copy(usbDebuggingEnabled = enabled) }
     }
 
-    fun startPackageSetup(operation: PackageOperation) {
-        setupCoordinator.start(operation)
+    fun startPackageSetup(operation: PackageOperation, accessMode: SetupAccessMode) {
+        setupCoordinator.start(operation, accessMode)
     }
 
     fun submitPairingCode(code: String) = setupCoordinator.submitPairingCode(code)
@@ -144,6 +145,7 @@ class MapperViewModel(
         appendLine(
             "Setup: phase=${_uiState.value.setup.phase} " +
                 "operation=${_uiState.value.setup.operation} " +
+                "accessMode=${_uiState.value.setup.accessMode} " +
                 "package=${_uiState.value.setup.packageStatus} " +
                 "screenOff=${_uiState.value.setup.screenOffAccessGranted}",
         )

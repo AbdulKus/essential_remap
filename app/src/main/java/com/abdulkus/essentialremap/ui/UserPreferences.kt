@@ -2,6 +2,7 @@ package com.abdulkus.essentialremap.ui
 
 import android.content.Context
 import com.abdulkus.essentialremap.ScreenOffKeyAccess
+import com.abdulkus.essentialremap.setup.SetupAccessMode
 
 enum class AppLanguage(
     val code: String,
@@ -53,6 +54,12 @@ class UserPreferences(context: Context) {
             preferences.edit().putBoolean(KEY_ONBOARDING_COMPLETE, value).apply()
         }
 
+    var setupAccessMode: SetupAccessMode
+        get() = SetupAccessMode.fromStored(preferences.getString(KEY_SETUP_ACCESS_MODE, null))
+        set(value) {
+            preferences.edit().putString(KEY_SETUP_ACCESS_MODE, value.name).apply()
+        }
+
     var screenOffEnabled: Boolean
         get() {
             if (!preferences.contains(KEY_SCREEN_OFF_ENABLED)) {
@@ -78,6 +85,7 @@ class UserPreferences(context: Context) {
     private companion object {
         const val KEY_LANGUAGE = "language"
         const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
+        const val KEY_SETUP_ACCESS_MODE = "setup_access_mode"
         const val KEY_SCREEN_OFF_ENABLED = "screen_off_enabled"
         const val KEY_CONFIGURED_LAUNCH_COUNT = "configured_launch_count"
     }

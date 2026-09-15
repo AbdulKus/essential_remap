@@ -9,7 +9,7 @@ import com.abdulkus.essentialremap.monitor.MonitorMessage
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import com.abdulkus.essentialremap.ui.UserPreferences
 
-/** Receives only explicit, DUMP-protected events emitted by the ADB shell monitor. */
+/** Receives only explicit, DUMP-protected events emitted by the privileged monitor. */
 class ShellKeyEventReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val diagnostics = (context.applicationContext as? EssentialKeyApplication)
@@ -98,7 +98,7 @@ internal object ShellKeyEventSenderPolicy {
     private const val UNAVAILABLE_UID = -1
 
     fun isAllowed(uid: Int?): Boolean =
-        uid == null || uid == UNAVAILABLE_UID || uid == Process.SHELL_UID
+        uid == null || uid == UNAVAILABLE_UID || uid == Process.SHELL_UID || uid == 0
 
     fun label(uid: Int?): String = when (uid) {
         null, UNAVAILABLE_UID -> "unavailable(DUMP-protected)"

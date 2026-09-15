@@ -2,13 +2,13 @@ package com.abdulkus.essentialremap.setup
 
 import java.util.Base64
 
-/** Shell-UID monitor for the Nothing Essential Key while the display is off. */
+/** Shell/root monitor for the Nothing Essential Key while the display is off. */
 object ShellKeyMonitorCommands {
     const val INSTALL = "essential-remap-internal:install-shell-monitor"
     const val START_OK = "essential-remap:shell-monitor-ok"
     const val STOP_OK = "essential-remap:shell-monitor-stopped"
     const val RUNNING = "essential-remap:shell-monitor-running"
-    const val REVISION = 11
+    const val REVISION = 12
     const val START_CONFIRMATION = "$START_OK revision=$REVISION"
     const val RUNNING_CONFIRMATION = "$RUNNING revision=$REVISION"
 
@@ -247,6 +247,11 @@ object ShellKeyMonitorCommands {
         "mkdir -p $DIRECTORY || exit 1; " +
             "printf %s $encodedScriptSingleLine | base64 -d > $TEMP_SCRIPT && " +
             "chmod 700 $TEMP_SCRIPT && mv -f $TEMP_SCRIPT $SCRIPT && /system/bin/sh $SCRIPT start"
+
+    // Root launches may create root-owned artifacts. Hand them back to Android shell so a later
+    // NON_ROOT setup can reuse the same directory after the root helper has been stopped.
+    val handoffFilesToShell: String =
+        "/system/bin/chown -R 2000:2000 $DIRECTORY && /system/bin/chmod 700 $DIRECTORY"
 
     const val stop = "/system/bin/sh $SCRIPT stop"
     const val status = "/system/bin/sh $SCRIPT status"
