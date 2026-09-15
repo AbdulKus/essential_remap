@@ -1,0 +1,1280 @@
+name: Apply root setup mode patch
+
+on:
+  push:
+    branches: [feature/root-setup-mode]
+    paths: [.github/workflows/apply-root-mode.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/root-setup-mode
+      - name: Apply root mode source changes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one match in {path}, got {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def sub_once(path, pattern, replacement):
+              p = Path(path)
+              text = p.read_text()
+              new, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"Expected one regex match in {path}, got {count}: {pattern[:100]!r}")
+              p.write_text(new)
+
+          # Persist the chosen privilege path. Existing installs default to the non-root behavior.
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/UserPreferences.kt",
+              "import com.abdulkus.essentialremap.ScreenOffKeyAccess\n",
+              "import com.abdulkus.essentialremap.ScreenOffKeyAccess\nimport com.abdulkus.essentialremap.setup.SetupAccessMode\n",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/UserPreferences.kt",
+              '''    var onboardingComplete: Boolean
+        get() = preferences.getBoolean(KEY_ONBOARDING_COMPLETE, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_ONBOARDING_COMPLETE, value).apply()
+        }
+
+    var screenOffEnabled: Boolean''',
+              '''    var onboardingComplete: Boolean
+        get() = preferences.getBoolean(KEY_ONBOARDING_COMPLETE, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_ONBOARDING_COMPLETE, value).apply()
+        }
+
+    var setupAccessMode: SetupAccessMode
+        get() = SetupAccessMode.fromStored(preferences.getString(KEY_SETUP_ACCESS_MODE, null))
+        set(value) {
+            preferences.edit().putString(KEY_SETUP_ACCESS_MODE, value.name).apply()
+        }
+
+    var screenOffEnabled: Boolean''',
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/UserPreferences.kt",
+              '        const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"\n',
+              '        const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"\n        const val KEY_SETUP_ACCESS_MODE = "setup_access_mode"\n',
+          )
+
+          # Route setup through the selected privilege mode. Root setup does not need notification/pairing permission.
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt",
+              "import com.abdulkus.essentialremap.setup.PackageOperation\n",
+              "import com.abdulkus.essentialremap.setup.PackageOperation\nimport com.abdulkus.essentialremap.setup.SetupAccessMode\n",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt",
+              "            startWirelessSetup(operation)\n",
+              "            startPackageSetup(operation)\n",
+          )
+          sub_once(
+              "app/src/main/java/com/abdulkus/essentialremap/MainActivity.kt",
+              r'''    private fun beginPackageSetup\(operation: PackageOperation\) \{.*?\n    private fun openWirelessDebuggingSetup\(\) \{''',
+              '''    private fun beginPackageSetup(operation: PackageOperation) {
+        val accessMode = userPreferences.setupAccessMode
+        if (accessMode == SetupAccessMode.NON_ROOT &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPackageOperation = operation
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        startPackageSetup(operation)
+    }
+
+    private fun startPackageSetup(operation: PackageOperation) {
+        viewModel.startPackageSetup(operation, userPreferences.setupAccessMode)
+    }
+
+    private fun openWirelessDebuggingSetup() {''',
+          )
+
+          # Carry the selected mode into setup and diagnostics.
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/MapperViewModel.kt",
+              "import com.abdulkus.essentialremap.setup.PackageOperation\n",
+              "import com.abdulkus.essentialremap.setup.PackageOperation\nimport com.abdulkus.essentialremap.setup.SetupAccessMode\n",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/MapperViewModel.kt",
+              '''    fun startPackageSetup(operation: PackageOperation) {
+        setupCoordinator.start(operation)
+    }''',
+              '''    fun startPackageSetup(operation: PackageOperation, accessMode: SetupAccessMode) {
+        setupCoordinator.start(operation, accessMode)
+    }''',
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ui/MapperViewModel.kt",
+              '                "operation=${_uiState.value.setup.operation} " +\n',
+              '                "operation=${_uiState.value.setup.operation} " +\n                "accessMode=${_uiState.value.setup.accessMode} " +\n',
+          )
+
+          # The same monitor may run as Android shell or as root. Bump revision so every existing helper is replaced.
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              "/** app_process entry point, running as shell. No Context, external network, alarms, or idle wake lock. */",
+              "/** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              "public static final int STATE_REVISION = 11;",
+              "public static final int STATE_REVISION = 12;",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              '''        if (android.os.Process.myUid() != 2000 || args.length != 2) {
+            throw new IllegalArgumentException("Expected shell UID, application UID and monitor directory");
+        }''',
+              '''        int monitorUid = android.os.Process.myUid();
+        if ((monitorUid != 2000 && monitorUid != 0) || args.length != 2) {
+            throw new IllegalArgumentException("Expected shell/root UID, application UID and monitor directory");
+        }''',
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/monitor/ShellMonitorMain.java",
+              '''                writeFile("key-monitor.state", "revision=" + STATE_REVISION + " pid=" +
+                    android.os.Process.myPid() + " input=" + device + " session=" + session);''',
+              '''                writeFile("key-monitor.state", "revision=" + STATE_REVISION + " pid=" +
+                    android.os.Process.myPid() + " uid=" + android.os.Process.myUid() +
+                    " input=" + device + " session=" + session);''',
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/setup/ShellKeyMonitorCommands.kt",
+              "const val REVISION = 11",
+              "const val REVISION = 12",
+          )
+
+          # Root broadcasts are still protected by android.permission.DUMP and the random transport secret.
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ShellKeyEventReceiver.kt",
+              "/** Receives only explicit, DUMP-protected events emitted by the ADB shell monitor. */",
+              "/** Receives only explicit, DUMP-protected events emitted by the privileged monitor. */",
+          )
+          replace_once(
+              "app/src/main/java/com/abdulkus/essentialremap/ShellKeyEventReceiver.kt",
+              '''    fun isAllowed(uid: Int?): Boolean =
+        uid == null || uid == UNAVAILABLE_UID || uid == Process.SHELL_UID''',
+              '''    fun isAllowed(uid: Int?): Boolean =
+        uid == null || uid == UNAVAILABLE_UID || uid == Process.SHELL_UID || uid == 0''',
+          )
+          replace_once(
+              "app/src/test/java/com/abdulkus/essentialremap/ShellKeyEventSenderPolicyTest.kt",
+              '''    fun shellAndPreAndroid14UnavailableSenderAreAccepted() {
+        assertTrue(ShellKeyEventSenderPolicy.isAllowed(Process.SHELL_UID))
+        assertTrue(ShellKeyEventSenderPolicy.isAllowed(null))
+    }''',
+              '''    fun shellRootAndPreAndroid14UnavailableSenderAreAccepted() {
+        assertTrue(ShellKeyEventSenderPolicy.isAllowed(Process.SHELL_UID))
+        assertTrue(ShellKeyEventSenderPolicy.isAllowed(0))
+        assertTrue(ShellKeyEventSenderPolicy.isAllowed(null))
+    }''',
+          )
+
+          # Coordinator: split ADB and root execution while keeping one operation model and one monitor implementation.
+          coordinator = "app/src/main/java/com/abdulkus/essentialremap/setup/EssentialKeySetupCoordinator.kt"
+          replace_once(
+              coordinator,
+              '''enum class SetupPhase {
+    IDLE,
+    DISCOVERING,''',
+              '''enum class SetupPhase {
+    IDLE,
+    REQUESTING_ROOT,
+    DISCOVERING,''',
+          )
+          replace_once(
+              coordinator,
+              '''data class EssentialKeySetupState(
+    val packageStatus: NothingPackageStatus = NothingPackageStatus.UNKNOWN,
+    val screenOffAccessGranted: Boolean = false,
+    val phase: SetupPhase = SetupPhase.IDLE,''',
+              '''data class EssentialKeySetupState(
+    val packageStatus: NothingPackageStatus = NothingPackageStatus.UNKNOWN,
+    val screenOffAccessGranted: Boolean = false,
+    val accessMode: SetupAccessMode = SetupAccessMode.NON_ROOT,
+    val phase: SetupPhase = SetupPhase.IDLE,''',
+          )
+          replace_once(
+              coordinator,
+              '''    val busy: Boolean get() = phase in setOf(
+        SetupPhase.DISCOVERING,''',
+              '''    val busy: Boolean get() = phase in setOf(
+        SetupPhase.REQUESTING_ROOT,
+        SetupPhase.DISCOVERING,''',
+          )
+          replace_once(
+              coordinator,
+              "    fun start(operation: PackageOperation)\n",
+              "    fun start(operation: PackageOperation, accessMode: SetupAccessMode)\n",
+          )
+          sub_once(
+              coordinator,
+              r'''    override fun start\(operation: PackageOperation\) \{.*?\n    override fun submitPairingCode\(code: String\) \{''',
+              '''    override fun start(operation: PackageOperation, accessMode: SetupAccessMode) {
+        setupJob?.cancel()
+        pairingCode = CompletableDeferred()
+        _state.value = EssentialKeySetupState(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+            accessMode = accessMode,
+            phase = if (accessMode == SetupAccessMode.ROOT) SetupPhase.REQUESTING_ROOT else SetupPhase.DISCOVERING,
+            operation = operation,
+            message = if (accessMode == SetupAccessMode.ROOT) {
+                text("Requesting root access…", "Запрашиваем root-доступ…")
+            } else {
+                text("Connecting to Wireless debugging…", "Подключаемся к Wireless debugging…")
+            },
+        )
+        diagnostics.log(
+            "--- Setup started: operation=$operation accessMode=$accessMode packageStatus=${_state.value.packageStatus} ---",
+        )
+        setupJob = scope.launch {
+            runCatching {
+                if (accessMode == SetupAccessMode.ROOT) {
+                    applyRootOperation(operation)
+                } else {
+                    val existingManager = connectUsingStoredIdentity()
+                    if (existingManager != null) {
+                        diagnostics.log("Using previously paired ADB identity")
+                        applyConnectedOperation(existingManager, operation)
+                    } else {
+                        pairThenApply(operation)
+                    }
+                }
+            }.onFailure { error ->
+                if (error is kotlinx.coroutines.CancellationException) return@onFailure
+                diagnostics.log("Setup failed: ${error.fullDescription()}")
+                _state.value = _state.value.copy(
+                    packageStatus = statusReader.read(),
+                    screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+                    phase = SetupPhase.ERROR,
+                    message = friendlyError(error),
+                )
+                postResultNotification(text("Setup failed", "Ошибка настройки"), friendlyError(error))
+            }
+        }
+    }
+
+    override fun submitPairingCode(code: String) {''',
+          )
+          replace_once(
+              coordinator,
+              '''        _state.value = EssentialKeySetupState(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+        )''',
+              '''        _state.value = EssentialKeySetupState(
+            packageStatus = statusReader.read(),
+            screenOffAccessGranted = ScreenOffKeyAccess.isGranted(appContext),
+            accessMode = _state.value.accessMode,
+        )''',
+          )
+          replace_once(
+              coordinator,
+              '''            _state.value = EssentialKeySetupState(
+                packageStatus = packageStatus,
+                screenOffAccessGranted = screenOffAccessGranted,
+                phase = SetupPhase.COMPLETE,''',
+              '''            _state.value = EssentialKeySetupState(
+                packageStatus = packageStatus,
+                screenOffAccessGranted = screenOffAccessGranted,
+                accessMode = SetupAccessMode.NON_ROOT,
+                phase = SetupPhase.COMPLETE,''',
+          )
+
+          root_methods = r'''    private suspend fun applyRootOperation(operation: PackageOperation) {
+        _state.value = _state.value.copy(
+            phase = SetupPhase.REQUESTING_ROOT,
+            message = text(
+                "Allow Essential Remap in your root manager to continue.",
+                "Разрешите Essential Remap root-доступ в менеджере root.",
+            ),
+        )
+        postProgressNotification()
+        diagnostics.log("Root setup: requesting su access")
+        RootCommandExecutor.requireRoot()
+        diagnostics.log("Root setup: su access granted")
+
+        _state.value = _state.value.copy(
+            phase = SetupPhase.APPLYING,
+            message = when (operation) {
+                PackageOperation.DISABLE -> text("Releasing Essential Key with root", "Освобождаем Essential Key через root")
+                PackageOperation.INSTALL_SLEEP_MONITOR -> text("Starting root sleep monitor", "Запускаем root-монитор сна")
+                PackageOperation.RESTORE -> text("Restoring Essential Space with root", "Восстанавливаем Essential Space через root")
+            },
+        )
+        postProgressNotification()
+
+        EssentialKeySetupCommands.commands(operation).forEach { command ->
+            diagnostics.log("Executing root setup command: $command")
+            val output = executeRootSetupCommand(command)
+            diagnostics.log("Root command output: ${output.take(MAX_LOG_OUTPUT_CHARS)}")
+        }
+        if (operation == PackageOperation.RESTORE) {
+            ScreenOffKeyAccess.markStopped(appContext)
+        }
+
+        val packageStatus = verifyPackageStateRoot(operation)
+        val screenOffAccessGranted = when (operation) {
+            PackageOperation.INSTALL_SLEEP_MONITOR -> {
+                verifyScreenOffAccessRoot()
+                val bridge = (appContext as EssentialKeyApplication).container.shellBridge
+                bridge.requestConnect()
+                withTimeout(5_000) {
+                    while (!ScreenOffKeyAccess.runtimeHealthy) delay(50)
+                }
+                ScreenOffKeyAccess.markStarted(appContext)
+                SleepMonitorBootReceiver.cancelReminder(appContext)
+                true
+            }
+            PackageOperation.DISABLE -> ScreenOffKeyAccess.isGranted(appContext)
+            PackageOperation.RESTORE -> false
+        }
+
+        diagnostics.log("Root operation verified: status=$packageStatus screenOff=$screenOffAccessGranted")
+        _state.value = EssentialKeySetupState(
+            packageStatus = packageStatus,
+            screenOffAccessGranted = screenOffAccessGranted,
+            accessMode = SetupAccessMode.ROOT,
+            phase = SetupPhase.COMPLETE,
+            operation = operation,
+            message = when (operation) {
+                PackageOperation.DISABLE -> text(
+                    "Essential Key released with root. ADB and developer options are not required.",
+                    "Essential Key освобождена через root. ADB и режим разработчика не требуются.",
+                )
+                PackageOperation.INSTALL_SLEEP_MONITOR -> text(
+                    "Root sleep monitor started. ADB can stay off; it will start automatically after a phone reboot.",
+                    "Root-монитор сна запущен. ADB можно оставить выключенным; после перезагрузки телефона он запустится автоматически.",
+                )
+                PackageOperation.RESTORE -> text(
+                    "Essential Space restored. Root is no longer needed for Essential Remap.",
+                    "Essential Space восстановлен. Root больше не нужен Essential Remap.",
+                )
+            },
+        )
+        val successMessage = _state.value.message.orEmpty()
+        ScreenOffKeyAccess.notifyChanged()
+        postResultNotification(text("Setup complete", "Настройка завершена"), successMessage)
+        returnToApp()
+    }
+
+    private fun executeRootSetupCommand(command: String): String {
+        require(EssentialKeySetupCommands.isAllowlisted(command)) { "Command is not allowlisted" }
+        val actualCommand = if (command == ShellKeyMonitorCommands.INSTALL) {
+            ShellKeyMonitorCommands.installAndStart
+        } else {
+            command
+        }
+        val output = RootCommandExecutor.execute(
+            actualCommand,
+            if (command == ShellKeyMonitorCommands.INSTALL) ROOT_MONITOR_TIMEOUT_MS else ROOT_COMMAND_TIMEOUT_MS,
+        )
+        when (command) {
+            EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH ->
+                check(output.contains(EssentialKeySetupCommands.COMMAND_OK)) {
+                    "Root could not configure the Essential Key screen-off path"
+                }
+            ShellKeyMonitorCommands.INSTALL ->
+                check(output.contains(ShellKeyMonitorCommands.START_CONFIRMATION)) {
+                    "Root sleep monitor did not confirm startup"
+                }
+            ShellKeyMonitorCommands.stop ->
+                check(output.contains(ShellKeyMonitorCommands.STOP_OK)) {
+                    "Root sleep monitor did not confirm shutdown"
+                }
+        }
+        return output
+    }
+
+    private fun verifyScreenOffAccessRoot() {
+        val settingOutput = RootCommandExecutor.execute(
+            EssentialKeySetupCommands.READ_SCREEN_OFF_WAKE_SETTING,
+            ROOT_COMMAND_TIMEOUT_MS,
+        )
+        check(settingOutput.lineSequence().any { it.trim() == "1" }) {
+            "Android did not block the OEM Essential Key screen-off wake path"
+        }
+        val monitorOutput = RootCommandExecutor.execute(
+            ShellKeyMonitorCommands.status,
+            ROOT_COMMAND_TIMEOUT_MS,
+        )
+        check(monitorOutput.contains(ShellKeyMonitorCommands.RUNNING_CONFIRMATION)) {
+            "Android did not keep the root key monitor running"
+        }
+        diagnostics.log("Screen-off access verified: root monitor running, nt_block_essential_key=1")
+    }
+
+    private fun verifyPackageStateRoot(operation: PackageOperation): NothingPackageStatus {
+        val flag = if (operation == PackageOperation.RESTORE) "-e" else "-d"
+        NothingPackageCommands.packages.forEach { packageName ->
+            val output = RootCommandExecutor.execute(
+                "pm list packages $flag $packageName",
+                ROOT_COMMAND_TIMEOUT_MS,
+            )
+            check(output.lineSequence().any { it.trim() == "package:$packageName" }) {
+                "Android could not verify package state for $packageName"
+            }
+        }
+        return if (operation == PackageOperation.RESTORE) {
+            NothingPackageStatus.ENABLED
+        } else {
+            NothingPackageStatus.DISABLED
+        }
+    }
+
+'''
+          replace_once(
+              coordinator,
+              "    private fun pairWithFallback(endpoint: AdbEndpoint, code: String) {\n",
+              root_methods + "    private fun pairWithFallback(endpoint: AdbEndpoint, code: String) {\n",
+          )
+          replace_once(
+              coordinator,
+              '''    private fun friendlyError(error: Throwable): String = when {
+        error is kotlinx.coroutines.TimeoutCancellationException ->''',
+              '''    private fun friendlyError(error: Throwable): String = when {
+        _state.value.accessMode == SetupAccessMode.ROOT &&
+            (error.message?.contains("root", ignoreCase = true) == true ||
+                error.message?.contains("su", ignoreCase = true) == true) ->
+            text(
+                "Root access failed. Allow Essential Remap in Magisk, KernelSU, APatch or your root manager and try again.",
+                "Не удалось получить root. Разрешите Essential Remap в Magisk, KernelSU, APatch или другом менеджере root и попробуйте снова.",
+            )
+        error is kotlinx.coroutines.TimeoutCancellationException ->''',
+          )
+          replace_once(
+              coordinator,
+              '''                CHANNEL_ID,
+                text("Wireless debugging setup", "Настройка Wireless debugging"),''',
+              '''                CHANNEL_ID,
+                text("Essential Remap setup", "Настройка Essential Remap"),''',
+          )
+          replace_once(
+              coordinator,
+              '''                description = text(
+                    "Accepts the local ADB pairing code during Essential Remap setup",
+                    "Принимает локальный код сопряжения ADB при настройке Essential Remap",
+                )''',
+              '''                description = text(
+                    "Shows setup progress and accepts a local ADB pairing code when non-root mode is used",
+                    "Показывает ход настройки и принимает локальный код ADB при использовании режима без root",
+                )''',
+          )
+          replace_once(
+              coordinator,
+              "        private const val COMMAND_TIMEOUT_MS = 15_000L\n",
+              "        private const val COMMAND_TIMEOUT_MS = 15_000L\n        private const val ROOT_COMMAND_TIMEOUT_MS = 10_000L\n        private const val ROOT_MONITOR_TIMEOUT_MS = 20_000L\n",
+          )
+
+          # Root boot auto-start. Non-root keeps the existing reminder flow.
+          Path("app/src/main/java/com/abdulkus/essentialremap/setup/SleepMonitorBootReceiver.kt").write_text(r'''package com.abdulkus.essentialremap.setup
+
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import com.abdulkus.essentialremap.EssentialKeyApplication
+import com.abdulkus.essentialremap.MainActivity
+import com.abdulkus.essentialremap.R
+import com.abdulkus.essentialremap.ScreenOffKeyAccess
+import com.abdulkus.essentialremap.ui.AppLanguage
+import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.ui.translate
+
+class SleepMonitorBootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val preferences = UserPreferences(context)
+        if (!preferences.screenOffEnabled) return
+
+        ScreenOffKeyAccess.markStopped(context)
+        if (preferences.setupAccessMode != SetupAccessMode.ROOT) {
+            postReminder(context, preferences.language, SetupAccessMode.NON_ROOT)
+            return
+        }
+
+        val pending = goAsync()
+        Thread({
+            val diagnostics = SetupDiagnostics(context)
+            runCatching {
+                diagnostics.log("Boot: starting sleep monitor through persisted root access")
+                RootCommandExecutor.requireRoot(ROOT_BOOT_AUTH_TIMEOUT_MS)
+                val settingOutput = RootCommandExecutor.execute(
+                    EssentialKeySetupCommands.ENABLE_RELIABLE_SCREEN_OFF_DISPATCH,
+                    ROOT_BOOT_COMMAND_TIMEOUT_MS,
+                )
+                check(settingOutput.contains(EssentialKeySetupCommands.COMMAND_OK)) {
+                    "Root boot setup could not configure Essential Key"
+                }
+                val output = RootCommandExecutor.execute(
+                    ShellKeyMonitorCommands.installAndStart,
+                    ROOT_BOOT_MONITOR_TIMEOUT_MS,
+                )
+                check(output.contains(ShellKeyMonitorCommands.START_CONFIRMATION)) {
+                    "Root boot monitor did not confirm startup"
+                }
+                ScreenOffKeyAccess.markStarted(context)
+                cancelReminder(context)
+                (context.applicationContext as? EssentialKeyApplication)?.container?.shellBridge?.requestConnect()
+                diagnostics.log("Boot: root sleep monitor started successfully")
+            }.onFailure { error ->
+                diagnostics.log("Boot: root sleep monitor auto-start failed: ${error.javaClass.simpleName}: ${error.message}")
+                postReminder(context, preferences.language, SetupAccessMode.ROOT)
+            }
+            pending.finish()
+        }, "essential-root-boot").apply { isDaemon = true }.start()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "essential_remap_sleep_monitor"
+        private const val NOTIFICATION_ID = 2054
+        private const val ROOT_BOOT_AUTH_TIMEOUT_MS = 5_000L
+        private const val ROOT_BOOT_COMMAND_TIMEOUT_MS = 5_000L
+        private const val ROOT_BOOT_MONITOR_TIMEOUT_MS = 15_000L
+
+        fun cancelReminder(context: Context) {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        }
+
+        private fun postReminder(context: Context, language: AppLanguage?, accessMode: SetupAccessMode) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+            val selectedLanguage = language ?: AppLanguage.ENGLISH
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    selectedLanguage.translate("Essential Remap sleep monitor", "Монитор сна Essential Remap"),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ),
+            )
+            val contentIntent = PendingIntent.getActivity(
+                context,
+                NOTIFICATION_ID,
+                Intent(context, MainActivity::class.java)
+                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val rootMode = accessMode == SetupAccessMode.ROOT
+            NotificationManagerCompat.from(context).notify(
+                NOTIFICATION_ID,
+                NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_notification)
+                    .setContentTitle(
+                        if (rootMode) {
+                            selectedLanguage.translate("Root sleep monitor needs attention", "Root-монитор сна требует внимания")
+                        } else {
+                            selectedLanguage.translate("Restart the sleep monitor", "Перезапустите монитор сна")
+                        },
+                    )
+                    .setContentText(
+                        if (rootMode) {
+                            selectedLanguage.translate(
+                                "Automatic root start failed after reboot.",
+                                "Автозапуск через root после перезагрузки не сработал.",
+                            )
+                        } else {
+                            selectedLanguage.translate(
+                                "Screen-off Essential Key handling must be reactivated after a phone reboot.",
+                                "Для работы Essential Key с выключенным экраном требуется повторная активация после перезагрузки.",
+                            )
+                        },
+                    )
+                    .setStyle(
+                        NotificationCompat.BigTextStyle().bigText(
+                            if (rootMode) {
+                                selectedLanguage.translate(
+                                    "Open Essential Remap and tap Restart. ADB is not required; make sure your root manager still allows Essential Remap.",
+                                    "Откройте Essential Remap и нажмите «Перезапуск». ADB не нужен; проверьте, что менеджер root всё ещё разрешает Essential Remap.",
+                                )
+                            } else {
+                                selectedLanguage.translate(
+                                    "Open Essential Remap, enable Wireless debugging, then tap Restart for the sleep monitor.",
+                                    "Откройте Essential Remap, включите Wireless debugging и нажмите «Перезапуск» у монитора сна.",
+                                )
+                            },
+                        ),
+                    )
+                    .setContentIntent(contentIntent)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        }
+    }
+}
+''')
+
+          # UI: add a dedicated ROOT / NON-ROOT onboarding step immediately after update checking.
+          screen = "app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt"
+          replace_once(
+              screen,
+              "import com.abdulkus.essentialremap.setup.SetupPhase\n",
+              "import com.abdulkus.essentialremap.setup.SetupPhase\nimport com.abdulkus.essentialremap.setup.SetupAccessMode\n",
+          )
+          replace_once(
+              screen,
+              '''    var screenOffEnabled by rememberSaveable { mutableStateOf(preferences.screenOffEnabled) }
+    val setScreenOffEnabled: (Boolean) -> Unit = { enabled ->
+        preferences.screenOffEnabled = enabled
+        screenOffEnabled = enabled
+    }
+    val language = AppLanguage.fromCode(languageCode)''',
+              '''    var screenOffEnabled by rememberSaveable { mutableStateOf(preferences.screenOffEnabled) }
+    val setScreenOffEnabled: (Boolean) -> Unit = { enabled ->
+        preferences.screenOffEnabled = enabled
+        screenOffEnabled = enabled
+    }
+    var setupAccessMode by rememberSaveable { mutableStateOf(preferences.setupAccessMode) }
+    val setSetupAccessMode: (SetupAccessMode) -> Unit = { mode ->
+        preferences.setupAccessMode = mode
+        setupAccessMode = mode
+    }
+    val language = AppLanguage.fromCode(languageCode)''',
+          )
+          replace_once(
+              screen,
+              '''            screenOffEnabled = screenOffEnabled,
+            setScreenOffEnabled = setScreenOffEnabled,
+            openSetupVideo = openSetupVideo,''',
+              '''            screenOffEnabled = screenOffEnabled,
+            setScreenOffEnabled = setScreenOffEnabled,
+            setupAccessMode = setupAccessMode,
+            setSetupAccessMode = setSetupAccessMode,
+            openSetupVideo = openSetupVideo,''',
+          )
+          replace_once(
+              screen,
+              '''        screenOffEnabled = screenOffEnabled,
+        setScreenOffEnabled = setScreenOffEnabled,
+        initiallyOpenSettings = initiallyOpenSettings,''',
+              '''        screenOffEnabled = screenOffEnabled,
+        setScreenOffEnabled = setScreenOffEnabled,
+        setupAccessMode = setupAccessMode,
+        initiallyOpenSettings = initiallyOpenSettings,''',
+          )
+
+          onboarding = r'''@Composable
+private fun OnboardingScreen(
+    language: AppLanguage,
+    state: MapperUiState,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    setupAccessMode: SetupAccessMode,
+    setSetupAccessMode: (SetupAccessMode) -> Unit,
+    openSetupVideo: () -> Unit,
+    updateState: UpdatePromptState,
+    checkForUpdates: () -> Unit,
+    downloadUpdate: (GitHubRelease) -> Unit,
+    installUpdate: (DownloadedUpdate) -> Unit,
+    dismissUpdate: () -> Unit,
+    openAccessibilitySettings: () -> Unit,
+    openDeveloperOptions: () -> Unit,
+    beginPackageSetup: (PackageOperation) -> Unit,
+    submitPairingCode: (String) -> Unit,
+    cancelPackageSetup: () -> Unit,
+    copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
+    finish: () -> Unit,
+) {
+    var page by rememberSaveable { mutableStateOf(0) }
+    var pairingCode by rememberSaveable { mutableStateOf("") }
+    val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
+    val screenOffReady = state.setup.screenOffAccessGranted
+    val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
+    val needsUsbStep = screenOffEnabled && setupAccessMode == SetupAccessMode.NON_ROOT
+    val basePage = if (needsUsbStep) 4 else 3
+    val accessibilityPage = basePage + 1
+    val sleepPage = accessibilityPage + 1
+    val readyPage = if (screenOffEnabled) sleepPage + 1 else accessibilityPage + 1
+    val pageCount = readyPage + 1
+    if (page >= pageCount) page = pageCount - 1
+
+    Scaffold { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MiniMark()
+                Text(
+                    "ESSENTIAL REMAP",
+                    modifier = Modifier.padding(start = 12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                Text("${page + 1}/$pageCount", fontFamily = FontFamily.Monospace)
+            }
+            Spacer(Modifier.height(36.dp))
+            when {
+                page == 0 -> UpdateCheckStep(
+                    language,
+                    updateState,
+                    checkForUpdates,
+                    downloadUpdate,
+                    installUpdate,
+                    dismissUpdate,
+                )
+                page == 1 -> AccessModeChoiceStep(language, setupAccessMode, setSetupAccessMode)
+                page == 2 -> ModeChoiceStep(language, setupAccessMode, screenOffEnabled, setScreenOffEnabled, openSetupVideo)
+                needsUsbStep && page == 3 -> UsbDebuggingStep(language, state)
+                page == basePage -> BaseSetupStep(
+                    language,
+                    state,
+                    setupAccessMode,
+                    pairingCode,
+                    { pairingCode = it.filter(Char::isDigit).take(6) },
+                    beginPackageSetup,
+                    submitPairingCode,
+                    cancelPackageSetup,
+                    openDeveloperOptions,
+                    copyText,
+                    copyDiagnostics,
+                    clearDiagnostics,
+                    page.toString().padStart(2, '0'),
+                )
+                page == accessibilityPage -> AccessibilityStep(
+                    language, state, openAccessibilitySettings, accessibilityPage.toString().padStart(2, '0'),
+                )
+                screenOffEnabled && page == sleepPage -> SleepSetupStep(
+                    language,
+                    state,
+                    setupAccessMode,
+                    pairingCode,
+                    { pairingCode = it.filter(Char::isDigit).take(6) },
+                    beginPackageSetup,
+                    submitPairingCode,
+                    cancelPackageSetup,
+                    copyText,
+                    copyDiagnostics,
+                    clearDiagnostics,
+                    page.toString().padStart(2, '0'),
+                )
+                else -> ReadyStep(
+                    language,
+                    screenOffEnabled,
+                    setupAccessMode,
+                    page.toString().padStart(2, '0'),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(28.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (page > 0) {
+                    OutlinedButton(onClick = { page-- }, modifier = Modifier.weight(1f)) {
+                        Text(language.t("BACK", "НАЗАД"))
+                    }
+                }
+                Button(
+                    onClick = { if (page == pageCount - 1) finish() else page++ },
+                    enabled = when {
+                        page == 0 -> true
+                        page == 1 -> true
+                        page == 2 -> true
+                        needsUsbStep && page == 3 -> state.usbDebuggingEnabled
+                        page == basePage -> keyReleased
+                        page == accessibilityPage -> serviceReady
+                        screenOffEnabled && page == sleepPage -> screenOffReady
+                        else -> true
+                    },
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(vertical = 14.dp),
+                ) {
+                    Text(if (page == pageCount - 1) language.t("DONE", "ГОТОВО") else language.t("NEXT", "ДАЛЕЕ"))
+                }
+            }
+        }
+    }
+}
+
+'''
+          sub_once(
+              screen,
+              r'''@Composable\nprivate fun OnboardingScreen\(.*?\n@Composable\nprivate fun UpdateCheckStep\(''',
+              onboarding + "@Composable\nprivate fun UpdateCheckStep(",
+          )
+
+          access_and_mode = r'''@Composable
+private fun AccessModeChoiceStep(
+    language: AppLanguage,
+    setupAccessMode: SetupAccessMode,
+    setSetupAccessMode: (SetupAccessMode) -> Unit,
+) {
+    StepHeading(
+        "01",
+        language.t("Choose access mode", "Выберите режим доступа"),
+        language.t(
+            "Both modes use the same Essential Key monitor. Root removes the ADB requirements and can restore the monitor automatically after reboot.",
+            "Оба режима используют один и тот же монитор Essential Key. Root убирает требования ADB и позволяет автоматически запускать монитор после перезагрузки.",
+        ),
+    )
+    Spacer(Modifier.height(22.dp))
+    ModeOption(
+        language = language,
+        selected = setupAccessMode == SetupAccessMode.NON_ROOT,
+        title = language.t("NON-ROOT", "БЕЗ ROOT"),
+        detail = language.t(
+            "No root required. Setup uses local Wireless ADB. Screen-off mode keeps USB debugging enabled and needs a monitor restart after reboot.",
+            "Root не нужен. Настройка выполняется через локальный Wireless ADB. Для работы с выключенным экраном нужно оставить USB-отладку включённой и перезапускать монитор после перезагрузки.",
+        ),
+        onClick = { setSetupAccessMode(SetupAccessMode.NON_ROOT) },
+    )
+    Spacer(Modifier.height(10.dp))
+    ModeOption(
+        language = language,
+        selected = setupAccessMode == SetupAccessMode.ROOT,
+        title = "ROOT",
+        detail = language.t(
+            "Uses su from Magisk, KernelSU, APatch or another root manager. Wireless/USB debugging are not required and the sleep monitor auto-starts after reboot.",
+            "Использует su из Magisk, KernelSU, APatch или другого менеджера root. Wireless/USB-отладка не нужна, а монитор сна автоматически запускается после перезагрузки.",
+        ),
+        onClick = { setSetupAccessMode(SetupAccessMode.ROOT) },
+    )
+    if (setupAccessMode == SetupAccessMode.ROOT) {
+        Spacer(Modifier.height(14.dp))
+        Text(
+            language.t(
+                "Android will ask for root permission when Essential Remap applies the setup. Choose a persistent grant if your root manager offers it so boot auto-start can work.",
+                "Android запросит root-доступ, когда Essential Remap начнёт настройку. Если менеджер root позволяет, выдайте постоянное разрешение — оно нужно для автозапуска после перезагрузки.",
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun ModeChoiceStep(
+    language: AppLanguage,
+    setupAccessMode: SetupAccessMode,
+    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    openSetupVideo: () -> Unit,
+) {
+    val rootMode = setupAccessMode == SetupAccessMode.ROOT
+    StepHeading(
+        "02",
+        language.t("Choose button mode", "Выберите режим работы"),
+        language.t(
+            "You can change screen-off handling later in Settings.",
+            "Работу с выключенным экраном можно изменить позже в настройках.",
+        ),
+    )
+    Spacer(Modifier.height(22.dp))
+    ModeOption(
+        language = language,
+        selected = !screenOffEnabled,
+        title = language.t("Screen on", "Только включённый экран"),
+        detail = language.t(
+            "Simpler setup. No background input monitor is installed.",
+            "Более простая настройка. Фоновый монитор нажатий не устанавливается.",
+        ),
+        onClick = { setScreenOffEnabled(false) },
+    )
+    Spacer(Modifier.height(10.dp))
+    ModeOption(
+        language = language,
+        selected = screenOffEnabled,
+        title = language.t("Screen on + off", "Включённый + выключенный экран"),
+        detail = if (rootMode) {
+            language.t(
+                "Adds the root sleep monitor. It starts automatically after reboot and does not require ADB to stay enabled.",
+                "Добавляет root-монитор сна. Он автоматически запускается после перезагрузки и не требует включённого ADB.",
+            )
+        } else {
+            language.t(
+                "Adds the shell sleep monitor. Keep USB debugging enabled and restart the monitor after every phone reboot.",
+                "Добавляет shell-монитор сна. Оставьте USB-отладку включённой и перезапускайте монитор после каждой перезагрузки телефона.",
+            )
+        },
+        onClick = { setScreenOffEnabled(true) },
+    )
+    Spacer(Modifier.height(16.dp))
+    OutlinedButton(onClick = openSetupVideo, modifier = Modifier.fillMaxWidth()) {
+        Text(language.t("VIDEO SETUP GUIDE", "ВИДЕО ИНСТРУКЦИЯ ПО НАСТРОЙКЕ"), textAlign = TextAlign.Center)
+    }
+}
+
+'''
+          sub_once(
+              screen,
+              r'''@Composable\nprivate fun ModeChoiceStep\(.*?\n@Composable\nprivate fun ModeOption\(''',
+              access_and_mode + "@Composable\nprivate fun ModeOption(",
+          )
+          replace_once(
+              screen,
+              '''private fun UsbDebuggingStep(language: AppLanguage, state: MapperUiState) {
+    val context = LocalContext.current
+    StepHeading(
+        "02",''',
+              '''private fun UsbDebuggingStep(language: AppLanguage, state: MapperUiState) {
+    val context = LocalContext.current
+    StepHeading(
+        "03",''',
+          )
+
+          base_setup = r'''@Composable
+private fun BaseSetupStep(
+    language: AppLanguage,
+    state: MapperUiState,
+    setupAccessMode: SetupAccessMode,
+    pairingCode: String,
+    changePairingCode: (String) -> Unit,
+    beginPackageSetup: (PackageOperation) -> Unit,
+    submitPairingCode: (String) -> Unit,
+    cancelPackageSetup: () -> Unit,
+    openDeveloperOptions: () -> Unit,
+    copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
+    stepNumber: String,
+) {
+    val rootMode = setupAccessMode == SetupAccessMode.ROOT
+    StepHeading(
+        stepNumber,
+        language.t("Release Essential Key", "Освободите Essential Key"),
+        if (rootMode) {
+            language.t(
+                "Essential Remap uses root to disable the two Nothing components that own the button. Their data is kept and the change can be restored later.",
+                "Essential Remap через root отключит два компонента Nothing, которые забирают кнопку. Их данные сохранятся, а изменение можно будет откатить.",
+            )
+        } else {
+            language.t(
+                "Essential Remap disables the two Nothing components that currently own the button through local Wireless ADB. Their data is kept and the change can be restored later.",
+                "Essential Remap через локальный Wireless ADB отключит два компонента Nothing, которые сейчас забирают кнопку. Их данные сохранятся, а изменение можно будет откатить.",
+            )
+        },
+    )
+    Spacer(Modifier.height(22.dp))
+    StatusCard(
+        success = state.setup.packageStatus == NothingPackageStatus.DISABLED,
+        title = packageStatusTitle(language, state.setup.packageStatus),
+        detail = language.t("Essential Space and Essential Recorder", "Essential Space и Essential Recorder"),
+    )
+    Spacer(Modifier.height(14.dp))
+    if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
+        SetupProgress(
+            language,
+            state,
+            pairingCode,
+            changePairingCode,
+            submitPairingCode,
+            cancelPackageSetup,
+            copyDiagnostics,
+            clearDiagnostics,
+        )
+    }
+    if (state.setup.packageStatus != NothingPackageStatus.DISABLED && !state.setup.busy) {
+        if (rootMode) {
+            RootSetupGuide(language)
+        } else {
+            AdbSetupGuide(
+                language = language,
+                developerOptionsEnabled = state.developerOptionsEnabled,
+                openDeveloperOptions = openDeveloperOptions,
+            )
+        }
+        Spacer(Modifier.height(14.dp))
+        Button(
+            onClick = { beginPackageSetup(PackageOperation.DISABLE) },
+            enabled = rootMode || state.developerOptionsEnabled,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 14.dp),
+        ) { Text(language.t("RELEASE KEY", "ОСВОБОДИТЬ КНОПКУ")) }
+    }
+    if (!rootMode) ManualCommands(language, copyText, includeSleepMonitor = false)
+}
+
+@Composable
+private fun RootSetupGuide(language: AppLanguage) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("ROOT / SU", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            Text(
+                language.t(
+                    "Tap the button below and approve Essential Remap in your root manager. No Developer options, Wireless debugging or computer are required.",
+                    "Нажмите кнопку ниже и разрешите Essential Remap в менеджере root. Режим разработчика, Wireless debugging и компьютер не нужны.",
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+'''
+          sub_once(
+              screen,
+              r'''@Composable\nprivate fun BaseSetupStep\(.*?\n@Composable\nprivate fun AdbSetupGuide\(''',
+              base_setup + "@Composable\nprivate fun AdbSetupGuide(",
+          )
+
+          sleep_ready = r'''@Composable
+private fun SleepSetupStep(
+    language: AppLanguage,
+    state: MapperUiState,
+    setupAccessMode: SetupAccessMode,
+    pairingCode: String,
+    changePairingCode: (String) -> Unit,
+    beginPackageSetup: (PackageOperation) -> Unit,
+    submitPairingCode: (String) -> Unit,
+    cancelPackageSetup: () -> Unit,
+    copyText: (String) -> Unit,
+    copyDiagnostics: () -> Unit,
+    clearDiagnostics: () -> Unit,
+    stepNumber: String,
+) {
+    val rootMode = setupAccessMode == SetupAccessMode.ROOT
+    StepHeading(
+        stepNumber,
+        language.t("Enable screen-off handling", "Включите работу с выключенным экраном"),
+        if (rootMode) {
+            language.t(
+                "The sleep monitor runs with root privileges, listens only for Essential Key and does not hold a wake lock. Essential Remap will start it automatically after reboot.",
+                "Монитор сна работает с root-правами, слушает только Essential Key и не удерживает процессор активным. Essential Remap автоматически запустит его после перезагрузки.",
+            )
+        } else {
+            language.t(
+                "The sleep monitor runs with Android shell privileges and listens only for Essential Key. It does not hold a wake lock. After a phone reboot it must be restarted.",
+                "Монитор сна запускается с правами Android shell и слушает только Essential Key. Он не удерживает процессор активным. После перезагрузки телефона его нужно перезапустить.",
+            )
+        },
+    )
+    Spacer(Modifier.height(22.dp))
+    StatusCard(
+        success = state.setup.screenOffAccessGranted,
+        title = if (state.setup.screenOffAccessGranted) {
+            language.t("Sleep monitor is running", "Монитор сна работает")
+        } else {
+            language.t("Sleep monitor is not running", "Монитор сна не запущен")
+        },
+        detail = if (rootMode) {
+            language.t(
+                "ADB may stay completely off. A persistent root grant lets Essential Remap restart the monitor automatically after reboot.",
+                "ADB можно полностью выключить. Постоянное root-разрешение позволяет Essential Remap автоматически запускать монитор после перезагрузки.",
+            )
+        } else {
+            language.t(
+                "Keep USB debugging enabled so Android does not stop the monitor when Wi-Fi disconnects. No cable is needed. Restart after a phone reboot.",
+                "Оставьте «Отладку по USB» включённой, чтобы Android не останавливал монитор при отключении Wi-Fi. Кабель не нужен. После перезагрузки телефона нужен перезапуск.",
+            )
+        },
+    )
+    Spacer(Modifier.height(14.dp))
+    if (state.setup.busy || state.setup.phase == SetupPhase.ERROR || state.setup.phase == SetupPhase.COMPLETE) {
+        SetupProgress(
+            language,
+            state,
+            pairingCode,
+            changePairingCode,
+            submitPairingCode,
+            cancelPackageSetup,
+            copyDiagnostics,
+            clearDiagnostics,
+        )
+    }
+    if (!state.setup.screenOffAccessGranted && !state.setup.busy) {
+        Button(
+            onClick = { beginPackageSetup(PackageOperation.INSTALL_SLEEP_MONITOR) },
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(vertical = 14.dp),
+        ) { Text(language.t("INSTALL SLEEP MONITOR", "УСТАНОВИТЬ МОНИТОР СНА"), textAlign = TextAlign.Center) }
+    }
+    BatteryAccessCard(language)
+    if (!rootMode) ManualCommands(language, copyText, includeSleepMonitor = true)
+}
+
+@Composable
+private fun ReadyStep(
+    language: AppLanguage,
+    screenOffEnabled: Boolean,
+    setupAccessMode: SetupAccessMode,
+    stepNumber: String,
+) {
+    val rootMode = setupAccessMode == SetupAccessMode.ROOT
+    StepHeading(
+        stepNumber,
+        language.t("Ready", "Готово"),
+        if (screenOffEnabled && rootMode) {
+            language.t(
+                "Essential Key is ready with the display on and off. Root mode will restore the sleep monitor automatically after reboot; ADB can stay off.",
+                "Essential Key готова к работе с включённым и выключенным экраном. Root-режим автоматически восстановит монитор после перезагрузки; ADB можно оставить выключенным.",
+            )
+        } else if (screenOffEnabled) {
+            language.t(
+                "Essential Key is ready with the display on and off. After a phone reboot, restart the sleep monitor from Settings.",
+                "Essential Key готова к работе с включённым и выключенным экраном. После перезагрузки телефона перезапустите монитор сна в настройках.",
+            )
+        } else {
+            language.t(
+                "Essential Key is ready while the display is on. You can enable screen-off handling later in Settings.",
+                "Essential Key готова к работе при включённом экране. Работу с выключенным экраном можно включить позже в настройках.",
+            )
+        },
+    )
+    Spacer(Modifier.height(22.dp))
+    StatusCard(true, language.t("Single press", "Одно нажатие"), language.t("Voice assistant", "Голосовой помощник"))
+    Spacer(Modifier.height(10.dp))
+    StatusCard(true, language.t("Double press", "Двойное нажатие"), "Circle to Search")
+    Spacer(Modifier.height(10.dp))
+    StatusCard(true, language.t("Long press", "Удержание"), language.t("Flashlight", "Фонарик"))
+}
+
+'''
+          sub_once(
+              screen,
+              r'''@Composable\nprivate fun SleepSetupStep\(.*?\n@Composable\nprivate fun StepHeading\(''',
+              sleep_ready + "@Composable\nprivate fun StepHeading(",
+          )
+
+          # Home/settings descriptions follow the selected mode.
+          replace_once(
+              screen,
+              '''    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    initiallyOpenSettings: Boolean,''',
+              '''    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    setupAccessMode: SetupAccessMode,
+    initiallyOpenSettings: Boolean,''',
+          )
+          replace_once(
+              screen,
+              '''            screenOffEnabled,
+            setScreenOffEnabled,
+            changeLanguage,''',
+              '''            screenOffEnabled,
+            setScreenOffEnabled,
+            setupAccessMode,
+            changeLanguage,''',
+          )
+          replace_once(
+              screen,
+              '''    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    changeLanguage: (AppLanguage) -> Unit,''',
+              '''    screenOffEnabled: Boolean,
+    setScreenOffEnabled: (Boolean) -> Unit,
+    setupAccessMode: SetupAccessMode,
+    changeLanguage: (AppLanguage) -> Unit,''',
+          )
+          replace_once(
+              screen,
+              '''                            language.t(
+                                "Keep USB debugging enabled when turning Wi-Fi off. No cable is needed. Restart the monitor after a phone reboot.",
+                                "При отключении Wi-Fi оставьте «Отладку по USB» включённой. Кабель не нужен. После перезагрузки телефона перезапустите монитор.",
+                            ),''',
+              '''                            if (setupAccessMode == SetupAccessMode.ROOT) {
+                                language.t(
+                                    "Root mode: ADB may stay off and the monitor auto-starts after reboot.",
+                                    "Root-режим: ADB можно оставить выключенным, монитор запускается автоматически после перезагрузки.",
+                                )
+                            } else {
+                                language.t(
+                                    "Keep USB debugging enabled when turning Wi-Fi off. No cable is needed. Restart the monitor after a phone reboot.",
+                                    "При отключении Wi-Fi оставьте «Отладку по USB» включённой. Кабель не нужен. После перезагрузки телефона перезапустите монитор.",
+                                )
+                            },''',
+          )
+          replace_once(
+              screen,
+              '''                    ManualCommands(language, copyText, includeSleepMonitor = screenOffEnabled)
+                    HorizontalDivider()
+                    SectionLabel(language.t("BUTTON", "КНОПКА"))''',
+              '''                    if (setupAccessMode == SetupAccessMode.NON_ROOT) {
+                        ManualCommands(language, copyText, includeSleepMonitor = screenOffEnabled)
+                    }
+                    HorizontalDivider()
+                    SectionLabel(language.t("SETUP ACCESS", "РЕЖИМ ДОСТУПА"))
+                    SettingsRow(
+                        language.t("Privilege mode", "Режим прав"),
+                        if (setupAccessMode == SetupAccessMode.ROOT) {
+                            language.t("ROOT · no ADB required", "ROOT · ADB не требуется")
+                        } else {
+                            language.t("NON-ROOT · local Wireless ADB", "БЕЗ ROOT · локальный Wireless ADB")
+                        },
+                    ) { dismiss(); runSetupAgain() }
+                    HorizontalDivider()
+                    SectionLabel(language.t("BUTTON", "КНОПКА"))''',
+          )
+          replace_once(
+              screen,
+              '''                        subtitle = if (screenOffEnabled) {
+                            language.t(
+                                "Uses the sleep monitor; restart it after a phone reboot",
+                                "Использует монитор сна; после перезагрузки телефона нужен перезапуск",
+                            )
+                        } else {''',
+              '''                        subtitle = if (screenOffEnabled && setupAccessMode == SetupAccessMode.ROOT) {
+                            language.t(
+                                "Uses the root sleep monitor; automatic restart after reboot",
+                                "Использует root-монитор сна; автозапуск после перезагрузки",
+                            )
+                        } else if (screenOffEnabled) {
+                            language.t(
+                                "Uses the shell sleep monitor; restart it after a phone reboot",
+                                "Использует shell-монитор сна; после перезагрузки нужен перезапуск",
+                            )
+                        } else {''',
+          )
+          replace_once(
+              screen,
+              '''private fun setupPhaseTitle(language: AppLanguage, phase: SetupPhase): String = when (phase) {
+    SetupPhase.IDLE -> language.t("Ready", "Готово")
+    SetupPhase.DISCOVERING ->''',
+              '''private fun setupPhaseTitle(language: AppLanguage, phase: SetupPhase): String = when (phase) {
+    SetupPhase.IDLE -> language.t("Ready", "Готово")
+    SetupPhase.REQUESTING_ROOT -> language.t("Requesting root access", "Запрос root-доступа")
+    SetupPhase.DISCOVERING ->''',
+          )
+
+          # Remove this temporary patch workflow from the resulting branch.
+          Path(".github/workflows/apply-root-mode.yml").unlink()
+
+      - name: Commit root mode implementation
+        run: |
+          git config user.name "free_vibrancy"
+          git config user.email "73951988+AbdulKus@users.noreply.github.com"
+          git add -A
+          git commit -m "Add root and non-root setup modes"
+          git push origin HEAD:feature/root-setup-mode
