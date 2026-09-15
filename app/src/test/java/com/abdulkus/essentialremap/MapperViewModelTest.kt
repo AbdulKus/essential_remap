@@ -13,6 +13,7 @@ import com.abdulkus.essentialremap.setup.EssentialKeySetupController
 import com.abdulkus.essentialremap.setup.EssentialKeySetupState
 import com.abdulkus.essentialremap.setup.NothingPackageStatus
 import com.abdulkus.essentialremap.setup.PackageOperation
+import com.abdulkus.essentialremap.setup.SetupAccessMode
 import com.abdulkus.essentialremap.ui.MapperViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -255,7 +256,7 @@ class MapperViewModelTest {
         var cleared = false
         override val state = flow
         override fun refresh() = Unit
-        override fun start(operation: PackageOperation) = Unit
+        override fun start(operation: PackageOperation, accessMode: SetupAccessMode) = Unit
         override fun submitPairingCode(code: String) = Unit
         override fun cancel() = Unit
         override fun diagnosticReport() = report
