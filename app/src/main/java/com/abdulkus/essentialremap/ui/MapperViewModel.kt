@@ -167,8 +167,6 @@ class MapperViewModel(
                     ConfiguredAction.LaunchApp(it.packageName, it.label)
                 }
                 ?: ConfiguredAction.LaunchApp()
-            ActionKind.LAUNCH_ACTIVITY -> current as? ConfiguredAction.LaunchActivity
-                ?: ConfiguredAction.LaunchActivity()
             ActionKind.OPEN_URL -> current as? ConfiguredAction.OpenUrl ?: ConfiguredAction.OpenUrl()
             ActionKind.SYSTEM -> current as? ConfiguredAction.PerformSystemAction
                 ?: ConfiguredAction.PerformSystemAction()
@@ -208,7 +206,14 @@ class MapperViewModel(
 
     fun updateLaunchActivity(gesture: PressAction, activity: LaunchableActivity) {
         val label = "${activity.appLabel} — ${activity.activityLabel}"
-        updateAction(gesture, ConfiguredAction.LaunchActivity(activity.componentName, label))
+        updateAction(
+            gesture,
+            ConfiguredAction.LaunchApp(
+                packageName = activity.packageName,
+                label = label,
+                componentName = activity.componentName,
+            ),
+        )
     }
 
     fun updateHaptic(strength: HapticStrength) {
@@ -317,7 +322,6 @@ class MapperViewModel(
         -> null
         is ConfiguredAction.Http -> validateEndpoint(action.endpoint)
         is ConfiguredAction.LaunchApp -> if (action.packageName.isBlank()) "Choose an app" else null
-        is ConfiguredAction.LaunchActivity -> if (action.componentName.isBlank()) "Choose an app action" else null
         is ConfiguredAction.OpenUrl -> validateAbsoluteUrl(action.url)
     }
 
