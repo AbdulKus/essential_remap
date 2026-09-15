@@ -43,6 +43,7 @@ data class MapperUiState(
     val launchableApps: List<LaunchableApp> = emptyList(),
     val notificationPolicyAccess: Boolean = false,
     val developerOptionsEnabled: Boolean = false,
+    val usbDebuggingEnabled: Boolean = false,
     val baseUrlErrors: Map<PressAction, String> = emptyMap(),
     val validationErrors: Map<PressAction, String> = emptyMap(),
     val initialized: Boolean = false,
@@ -120,6 +121,10 @@ class MapperViewModel(
 
     fun updateDeveloperOptionsStatus(enabled: Boolean) {
         _uiState.update { it.copy(developerOptionsEnabled = enabled) }
+    }
+
+    fun updateUsbDebuggingStatus(enabled: Boolean) {
+        _uiState.update { it.copy(usbDebuggingEnabled = enabled) }
     }
 
     fun startPackageSetup(operation: PackageOperation) {

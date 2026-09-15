@@ -332,7 +332,10 @@ private fun OnboardingScreen(
     val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED
     val screenOffReady = state.setup.screenOffAccessGranted
     val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()
-    val pageCount = if (screenOffEnabled) 6 else 5
+    val basePage = if (screenOffEnabled) 3 else 2
+    val accessibilityPage = basePage + 1
+    val sleepPage = accessibilityPage + 1
+    val pageCount = if (screenOffEnabled) 7 else 5
     if (page >= pageCount) page = pageCount - 1
 
     Scaffold { padding ->
@@ -366,7 +369,8 @@ private fun OnboardingScreen(
                     dismissUpdate,
                 )
                 page == 1 -> ModeChoiceStep(language, screenOffEnabled, setScreenOffEnabled, openSetupVideo)
-                page == 2 -> BaseSetupStep(
+                screenOffEnabled && page == 2 -> UsbDebuggingStep(language, state)
+                page == basePage -> BaseSetupStep(
                     language,
                     state,
                     pairingCode,
@@ -378,9 +382,12 @@ private fun OnboardingScreen(
                     copyText,
                     copyDiagnostics,
                     clearDiagnostics,
+                    page.toString().padStart(2, '0'),
                 )
-                page == 3 -> AccessibilityStep(language, state, openAccessibilitySettings)
-                screenOffEnabled && page == 4 -> SleepSetupStep(
+                page == accessibilityPage -> AccessibilityStep(
+                    language, state, openAccessibilitySettings, accessibilityPage.toString().padStart(2, '0'),
+                )
+                screenOffEnabled && page == sleepPage -> SleepSetupStep(
                     language,
                     state,
                     pairingCode,
@@ -391,6 +398,7 @@ private fun OnboardingScreen(
                     copyText,
                     copyDiagnostics,
                     clearDiagnostics,
+                    page.toString().padStart(2, '0'),
                 )
                 else -> ReadyStep(language, screenOffEnabled)
             }
@@ -407,9 +415,10 @@ private fun OnboardingScreen(
                     enabled = when {
                         page == 0 -> true
                         page == 1 -> true
-                        page == 2 -> keyReleased
-                        page == 3 -> serviceReady
-                        screenOffEnabled && page == 4 -> screenOffReady
+                        screenOffEnabled && page == 2 -> state.usbDebuggingEnabled
+                        page == basePage -> keyReleased
+                        page == accessibilityPage -> serviceReady
+                        screenOffEnabled && page == sleepPage -> screenOffReady
                         else -> true
                     },
                     modifier = Modifier.weight(1f),
@@ -631,6 +640,62 @@ private fun ModeOption(
 }
 
 @Composable
+private fun UsbDebuggingStep(language: AppLanguage, state: MapperUiState) {
+    val context = LocalContext.current
+    StepHeading(
+        "02",
+        language.t("Enable USB debugging", "Включите отладку по USB"),
+        language.t(
+            "Leave USB debugging enabled while using the sleep monitor. This keeps the button working when Wi-Fi disconnects. No USB cable or computer is needed. After a phone reboot, restart the monitor.",
+            "Не отключайте отладку по USB, пока пользуетесь монитором сна. Так кнопка продолжит работать при отключении Wi-Fi. USB-кабель и компьютер не нужны. После перезагрузки телефона монитор нужно запустить снова.",
+        ),
+    )
+    Spacer(Modifier.height(22.dp))
+    StatusCard(
+        success = state.usbDebuggingEnabled,
+        title = if (state.usbDebuggingEnabled) {
+            language.t("USB debugging is enabled", "Отладка по USB включена")
+        } else {
+            language.t("USB debugging is disabled", "Отладка по USB выключена")
+        },
+        detail = language.t(
+            "Keep it enabled. Wi-Fi and Wireless debugging are only needed for setup and restarting the monitor.",
+            "Оставьте её включённой. Wi-Fi и беспроводная отладка нужны только для настройки и перезапуска монитора.",
+        ),
+    )
+    Spacer(Modifier.height(14.dp))
+    if (!state.developerOptionsEnabled) {
+        AdbGuideLine("1", language.t(
+            "Open About phone → NOTHING OS. Tap Build number 7 times to enable Developer options.",
+            "Откройте «О телефоне» → «NOTHING OS». Нажмите 7 раз на «Номер сборки», чтобы включить режим разработчика.",
+        ))
+    }
+    AdbGuideLine(if (state.developerOptionsEnabled) "1" else "2", language.t(
+        "In System → Developer options, enable USB debugging and confirm Android's prompt. Then return here.",
+        "В разделе «Система» → «Для разработчиков» включите «Отладку по USB» и подтвердите запрос Android. Затем вернитесь сюда.",
+    ))
+    Button(
+        onClick = {
+            val action = if (state.developerOptionsEnabled) {
+                android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS
+            } else {
+                android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS
+            }
+            runCatching { context.startActivity(android.content.Intent(action)) }
+                .onFailure { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(vertical = 14.dp),
+    ) {
+        Text(
+            if (state.developerOptionsEnabled) language.t("OPEN DEVELOPER OPTIONS", "ОТКРЫТЬ НАСТРОЙКИ РАЗРАБОТЧИКА")
+            else language.t("OPEN ABOUT PHONE", "ОТКРЫТЬ «О ТЕЛЕФОНЕ»"),
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
 private fun BaseSetupStep(
     language: AppLanguage,
     state: MapperUiState,
@@ -643,9 +708,10 @@ private fun BaseSetupStep(
     copyText: (String) -> Unit,
     copyDiagnostics: () -> Unit,
     clearDiagnostics: () -> Unit,
+    stepNumber: String,
 ) {
     StepHeading(
-        "02",
+        stepNumber,
         language.t("Release Essential Key", "Освободите Essential Key"),
         language.t(
             "Essential Remap disables the two Nothing components that currently own the button. Their data is kept and the change can be restored later.",
@@ -809,9 +875,10 @@ private fun AccessibilityStep(
     language: AppLanguage,
     state: MapperUiState,
     openAccessibilitySettings: () -> Unit,
+    stepNumber: String,
 ) {
     StepHeading(
-        "03",
+        stepNumber,
         language.t("Enable Essential Remap", "Включите Essential Remap"),
         language.t(
             "Accessibility lets the app receive the Essential Key while Android is in use. Essential Remap does not read screen content.",
@@ -854,9 +921,10 @@ private fun SleepSetupStep(
     copyText: (String) -> Unit,
     copyDiagnostics: () -> Unit,
     clearDiagnostics: () -> Unit,
+    stepNumber: String,
 ) {
     StepHeading(
-        "04",
+        stepNumber,
         language.t("Enable screen-off handling", "Включите работу с выключенным экраном"),
         language.t(
             "The sleep monitor runs with Android's shell privileges and listens only for Essential Key. It does not hold a wake lock. After a phone reboot it must be restarted.",
@@ -903,7 +971,7 @@ private fun SleepSetupStep(
 @Composable
 private fun ReadyStep(language: AppLanguage, screenOffEnabled: Boolean) {
     StepHeading(
-        if (screenOffEnabled) "05" else "04",
+        if (screenOffEnabled) "06" else "04",
         language.t("Ready", "Готово"),
         if (screenOffEnabled) {
             language.t(
