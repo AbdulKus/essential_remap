@@ -9,6 +9,20 @@ def replace_once(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new, 1))
 
 
+def replace_after(path: Path, anchor: str, old: str, new: str) -> None:
+    text = path.read_text()
+    anchor_pos = text.find(anchor)
+    if anchor_pos < 0:
+        raise SystemExit(f"{path}: anchor not found: {anchor!r}")
+    match_pos = text.find(old, anchor_pos)
+    if match_pos < 0:
+        raise SystemExit(f"{path}: scoped match not found after {anchor!r}")
+    next_anchor = text.find("\n@Composable\nprivate fun ", anchor_pos + len(anchor))
+    if next_anchor >= 0 and match_pos >= next_anchor:
+        raise SystemExit(f"{path}: scoped match escaped function {anchor!r}")
+    path.write_text(text[:match_pos] + new + text[match_pos + len(old):])
+
+
 root = Path(".")
 access = root / "app/src/main/java/com/abdulkus/essentialremap/ScreenOffKeyAccess.kt"
 boot = root / "app/src/main/java/com/abdulkus/essentialremap/setup/SleepMonitorBootReceiver.kt"
@@ -38,20 +52,23 @@ replace_once(
     '''    val keyReleased = state.setup.packageStatus == NothingPackageStatus.DISABLED\n    val screenOffReady = screenOffReadyForMode(state, setupAccessMode)\n    val serviceReady = state.serviceEnabled && state.competingServices.isEmpty()\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SleepSetupStep(",
     '''    val rootMode = setupAccessMode == SetupAccessMode.ROOT\n    StepHeading(\n''',
     '''    val rootMode = setupAccessMode == SetupAccessMode.ROOT\n    val monitorReady = screenOffReadyForMode(state, setupAccessMode)\n    StepHeading(\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SleepSetupStep(",
     '''    StatusCard(\n        success = state.setup.screenOffAccessGranted,\n        title = if (state.setup.screenOffAccessGranted) {\n            language.t("Sleep monitor is running", "Монитор сна работает")\n        } else {\n            language.t("Sleep monitor is not running", "Монитор сна не запущен")\n        },\n''',
     '''    StatusCard(\n        success = monitorReady,\n        title = if (monitorReady) {\n            language.t("Sleep monitor is running", "Монитор сна работает")\n        } else {\n            language.t("Sleep monitor is not running", "Монитор сна не запущен")\n        },\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SleepSetupStep(",
     '''    if (!state.setup.screenOffAccessGranted && !state.setup.busy) {\n        Button(\n''',
     '''    if (!monitorReady && !state.setup.busy) {\n        Button(\n''',
 )
@@ -59,35 +76,40 @@ replace_once(
 replace_once(
     ui,
     '''private fun StepHeading(number: String, title: String, detail: String) {\n    Text(number, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)\n    Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = 8.dp))\n    Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp), lineHeight = 21.sp)\n}\n''',
-    '''private fun StepHeading(number: String, title: String, detail: String) {\n    Text(number, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)\n    Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = 8.dp))\n    Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp), lineHeight = 21.sp)\n}\n\n@Composable\nprivate fun screenOffReadyForMode(state: MapperUiState, setupAccessMode: SetupAccessMode): Boolean {\n    val context = LocalContext.current\n    return state.setup.screenOffAccessGranted &&\n        ScreenOffKeyAccess.configuredAccessMode(context) == setupAccessMode\n}\n''',
+    '''private fun StepHeading(number: String, title: String, detail: String) {\n    Text(number, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)\n    Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = 8.dp))\n    Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp), lineHeight = 21.sp)\n}\n\n@Composable\nprivate fun screenOffReadyForMode(state: MapperUiState, setupAccessMode: SetupAccessMode): Boolean {\n    val context = LocalContext.current\n    return state.setup.screenOffAccessGranted &&\n        ScreenOffKeyAccess.isGrantedFor(context, setupAccessMode)\n}\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun HomeScreen(",
     '''    var soundGesture by remember { mutableStateOf<PressAction?>(null) }\n    var settingsOpen by rememberSaveable { mutableStateOf(initiallyOpenSettings) }\n    val baseSetupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()\n    val screenOffReady = !screenOffEnabled || state.setup.screenOffAccessGranted\n''',
     '''    var soundGesture by remember { mutableStateOf<PressAction?>(null) }\n    var settingsOpen by rememberSaveable { mutableStateOf(initiallyOpenSettings) }\n    val monitorReady = screenOffReadyForMode(state, setupAccessMode)\n    val baseSetupReady = state.keyReleased && state.serviceEnabled && state.competingServices.isEmpty()\n    val screenOffReady = !screenOffEnabled || monitorReady\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun HomeScreen(",
     '''                screenOffEnabled && !state.setup.screenOffAccessGranted -> item {\n''',
     '''                screenOffEnabled && !monitorReady -> item {\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SettingsDialog(",
     '''    var pairingCode by rememberSaveable { mutableStateOf("") }\n    Dialog(\n''',
     '''    var pairingCode by rememberSaveable { mutableStateOf("") }\n    val monitorReady = screenOffReadyForMode(state, setupAccessMode)\n    Dialog(\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SettingsDialog(",
     '''                        StatusCard(\n                            state.setup.screenOffAccessGranted,\n                            if (state.setup.screenOffAccessGranted) {\n                                language.t("Sleep monitor is running", "Монитор сна работает")\n                            } else {\n                                language.t("Sleep monitor needs restart", "Монитор сна нужно перезапустить")\n                            },\n''',
     '''                        StatusCard(\n                            monitorReady,\n                            if (monitorReady) {\n                                language.t("Sleep monitor is running", "Монитор сна работает")\n                            } else {\n                                language.t("Sleep monitor needs restart", "Монитор сна нужно перезапустить")\n                            },\n''',
 )
 
-replace_once(
+replace_after(
     ui,
+    "private fun SettingsDialog(",
     '''                                            if (state.setup.screenOffAccessGranted) {\n                                                language.t("RESTART", "ПЕРЕЗАПУСК")\n                                            } else {\n''',
     '''                                            if (monitorReady) {\n                                                language.t("RESTART", "ПЕРЕЗАПУСК")\n                                            } else {\n''',
 )
