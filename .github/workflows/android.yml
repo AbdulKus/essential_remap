@@ -107,6 +107,7 @@ jobs:
             essential-remap-${{ env.APP_VERSION }}.apk.sha256
             essential-remap-${{ env.APP_VERSION }}-debug.apk
             essential-remap-${{ env.APP_VERSION }}-androidTest.apk
+            app/src/main/java/com/abdulkus/essentialremap/ui/MapperScreen.kt
           if-no-files-found: error
           retention-days: 30
 
