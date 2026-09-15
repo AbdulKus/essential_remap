@@ -15,6 +15,7 @@ import com.abdulkus.essentialremap.domain.SystemAction
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import com.abdulkus.essentialremap.haptics.HapticResult
 import com.abdulkus.essentialremap.platform.AccessibilityStatus
+import com.abdulkus.essentialremap.platform.LaunchableActivity
 import com.abdulkus.essentialremap.platform.LaunchableApp
 import com.abdulkus.essentialremap.platform.LaunchableAppsReader
 import com.abdulkus.essentialremap.setup.EssentialKeySetupController
@@ -43,6 +44,7 @@ data class MapperUiState(
     val launchableApps: List<LaunchableApp> = emptyList(),
     val notificationPolicyAccess: Boolean = false,
     val developerOptionsEnabled: Boolean = false,
+    val usbDebuggingEnabled: Boolean = false,
     val baseUrlErrors: Map<PressAction, String> = emptyMap(),
     val validationErrors: Map<PressAction, String> = emptyMap(),
     val initialized: Boolean = false,
@@ -122,6 +124,10 @@ class MapperViewModel(
         _uiState.update { it.copy(developerOptionsEnabled = enabled) }
     }
 
+    fun updateUsbDebuggingStatus(enabled: Boolean) {
+        _uiState.update { it.copy(usbDebuggingEnabled = enabled) }
+    }
+
     fun startPackageSetup(operation: PackageOperation) {
         setupCoordinator.start(operation)
     }
@@ -161,6 +167,8 @@ class MapperViewModel(
                     ConfiguredAction.LaunchApp(it.packageName, it.label)
                 }
                 ?: ConfiguredAction.LaunchApp()
+            ActionKind.LAUNCH_ACTIVITY -> current as? ConfiguredAction.LaunchActivity
+                ?: ConfiguredAction.LaunchActivity()
             ActionKind.OPEN_URL -> current as? ConfiguredAction.OpenUrl ?: ConfiguredAction.OpenUrl()
             ActionKind.SYSTEM -> current as? ConfiguredAction.PerformSystemAction
                 ?: ConfiguredAction.PerformSystemAction()
@@ -196,6 +204,11 @@ class MapperViewModel(
 
     fun updateLaunchApp(gesture: PressAction, app: LaunchableApp) {
         updateAction(gesture, ConfiguredAction.LaunchApp(app.packageName, app.label))
+    }
+
+    fun updateLaunchActivity(gesture: PressAction, activity: LaunchableActivity) {
+        val label = "${activity.appLabel} — ${activity.activityLabel}"
+        updateAction(gesture, ConfiguredAction.LaunchActivity(activity.componentName, label))
     }
 
     fun updateHaptic(strength: HapticStrength) {
@@ -304,6 +317,7 @@ class MapperViewModel(
         -> null
         is ConfiguredAction.Http -> validateEndpoint(action.endpoint)
         is ConfiguredAction.LaunchApp -> if (action.packageName.isBlank()) "Choose an app" else null
+        is ConfiguredAction.LaunchActivity -> if (action.componentName.isBlank()) "Choose an app action" else null
         is ConfiguredAction.OpenUrl -> validateAbsoluteUrl(action.url)
     }
 
