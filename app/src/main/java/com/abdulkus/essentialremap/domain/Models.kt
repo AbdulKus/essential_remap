@@ -46,6 +46,7 @@ enum class ActionKind {
     NONE,
     HTTP,
     FLASHLIGHT,
+    FORCE_STOP_FOREGROUND_APP,
     SOUND_MODE,
     TOGGLE_SILENT,
     LAUNCH_APP,
@@ -75,6 +76,10 @@ sealed interface ConfiguredAction {
 
     data object Flashlight : ConfiguredAction {
         override val kind = ActionKind.FLASHLIGHT
+    }
+
+    data object ForceStopForegroundApp : ConfiguredAction {
+        override val kind = ActionKind.FORCE_STOP_FOREGROUND_APP
     }
 
     data class SetSoundMode(val mode: SoundMode = SoundMode.SILENT) : ConfiguredAction {

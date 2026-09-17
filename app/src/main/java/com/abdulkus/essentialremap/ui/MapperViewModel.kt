@@ -161,6 +161,7 @@ class MapperViewModel(
             ActionKind.NONE -> ConfiguredAction.None
             ActionKind.HTTP -> current as? ConfiguredAction.Http ?: ConfiguredAction.Http()
             ActionKind.FLASHLIGHT -> ConfiguredAction.Flashlight
+            ActionKind.FORCE_STOP_FOREGROUND_APP -> ConfiguredAction.ForceStopForegroundApp
             ActionKind.SOUND_MODE -> current as? ConfiguredAction.SetSoundMode
                 ?: ConfiguredAction.SetSoundMode()
             ActionKind.TOGGLE_SILENT ->
@@ -332,6 +333,7 @@ class MapperViewModel(
     internal fun validateAction(action: ConfiguredAction): String? = when (action) {
         ConfiguredAction.None,
         ConfiguredAction.Flashlight,
+        ConfiguredAction.ForceStopForegroundApp,
         ConfiguredAction.ToggleSilent,
         is ConfiguredAction.SetSoundMode,
         is ConfiguredAction.PerformSystemAction,

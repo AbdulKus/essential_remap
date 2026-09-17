@@ -85,6 +85,16 @@ class ActionExecutor(
                 },
             )
         }
+        ConfiguredAction.ForceStopForegroundApp -> withContext(Dispatchers.IO) {
+            val bridge = shellBridge
+                ?: return@withContext ActionExecutionResult(false, "Shell monitor is unavailable")
+            bridge.forceStopForegroundApp().fold(
+                onSuccess = { ActionExecutionResult(true, "Foreground app stopped") },
+                onFailure = { error ->
+                    ActionExecutionResult(false, error.message ?: "Could not stop the foreground app")
+                },
+            )
+        }
         is ConfiguredAction.OpenUrl -> withContext(Dispatchers.Main.immediate) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.url)))
         }
