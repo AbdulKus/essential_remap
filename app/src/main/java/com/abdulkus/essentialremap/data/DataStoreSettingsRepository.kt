@@ -97,6 +97,7 @@ private fun writeAction(
     when (action) {
         ConfiguredAction.None,
         ConfiguredAction.Flashlight,
+        ConfiguredAction.ForceStopForegroundApp,
         ConfiguredAction.ToggleSilent,
         -> Unit
         is ConfiguredAction.Http -> {
@@ -192,6 +193,7 @@ private fun readAction(
             endpoint = value,
         )
         ActionKind.FLASHLIGHT -> ConfiguredAction.Flashlight
+        ActionKind.FORCE_STOP_FOREGROUND_APP -> ConfiguredAction.ForceStopForegroundApp
         ActionKind.SOUND_MODE -> ConfiguredAction.SetSoundMode(value.toEnumOrDefault(SoundMode.SILENT))
         ActionKind.TOGGLE_SILENT -> ConfiguredAction.SetSoundMode(SoundMode.TOGGLE_SILENT_NORMAL)
         ActionKind.LAUNCH_APP -> ConfiguredAction.LaunchApp(
