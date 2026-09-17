@@ -45,6 +45,7 @@ internal val hindiTranslations: Map<String, String> = mapOf(
     "Press and hold" to "दबाकर रखें",
     "Voice assistant" to "वॉइस असिस्टेंट",
     "Flashlight" to "फ्लैशलाइट",
+    "Force stop app" to "ऐप को बलपूर्वक रोकें",
     "6-digit pairing code" to "6 अंकों का पेयरिंग कोड",
     "SUBMIT CODE" to "कोड भेजें",
     "Cancel" to "रद्द करें",
