@@ -1708,9 +1708,9 @@ private fun ActionChooserDialog(
             run = { chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP) },
         ),
         ActionOption(
-            language.t("Quick Settings tile", "Плитка Quick Settings"),
-            language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
-            chooseQuickSettingsTile,
+            title = language.t("Quick Settings tile", "Плитка Quick Settings"),
+            subtitle = language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
+            run = chooseQuickSettingsTile,
         ),
         ActionOption("Circle to Search", language.t("Google + Hold handle to search", "Google + удержание полоски для поиска")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
         ActionOption(language.t("Voice assistant", "Голосовой помощник")) { chooseSystem(SystemAction.ASSISTANT) },
@@ -1736,7 +1736,11 @@ private fun ActionChooserDialog(
         ActionOption(language.t("Home", "Домой")) { chooseSystem(SystemAction.HOME) },
         ActionOption(language.t("Recent apps", "Недавние приложения")) { chooseSystem(SystemAction.RECENTS) },
         ActionOption(language.t("Open link / deep link", "Открыть ссылку / deep link"), run = chooseUrl),
-        ActionOption(language.t("HTTP request", "HTTP-запрос"), language.t("For Tasker, Home Assistant and webhooks", "Для Tasker, Home Assistant и вебхуков"), chooseHttp),
+        ActionOption(
+            title = language.t("HTTP request", "HTTP-запрос"),
+            subtitle = language.t("For Tasker, Home Assistant and webhooks", "Для Tasker, Home Assistant и вебхуков"),
+            run = chooseHttp,
+        ),
         ActionOption(language.t("No action", "Ничего")) { chooseKind(ActionKind.NONE) },
     )
     Dialog(onDismissRequest = dismiss) {
