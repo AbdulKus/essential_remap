@@ -1694,6 +1694,9 @@ private fun ActionChooserDialog(
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
         ActionOption(language.t("Launch Activity", "Запуск Activity"), run = chooseActivity),
+        ActionOption(language.t("Force stop app", "Завершить приложение")) {
+            chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP)
+        },
         ActionOption(
             language.t("Quick Settings tile", "Плитка Quick Settings"),
             language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
@@ -2244,6 +2247,7 @@ private fun PressAction.title(language: AppLanguage): String = when (this) {
 private fun ConfiguredAction.summary(language: AppLanguage): String = when (this) {
     ConfiguredAction.None -> language.t("No action", "Ничего")
     ConfiguredAction.Flashlight -> language.t("Flashlight", "Фонарик")
+    ConfiguredAction.ForceStopForegroundApp -> language.t("Force stop app", "Завершить приложение")
     ConfiguredAction.ToggleSilent -> language.t("Toggle silent / normal", "Без звука / обычный")
     is ConfiguredAction.Http -> "${method.name} ${endpoint.ifBlank { language.t("request", "запрос") }}"
     is ConfiguredAction.SetSoundMode -> mode.title(language)
