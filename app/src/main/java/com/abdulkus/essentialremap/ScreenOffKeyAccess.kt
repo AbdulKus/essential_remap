@@ -89,5 +89,5 @@ object ScreenOffKeyAccess {
     private const val KEY_MONITOR_REVISION = "monitor_revision"
     private const val KEY_COMMAND_CAPABILITY_REVISION = "command_capability_revision"
     private const val KEY_ACCESS_MODE = "access_mode"
-    private const val COMMAND_CAPABILITY_REVISION = 1
+    private const val COMMAND_CAPABILITY_REVISION = 2
 }

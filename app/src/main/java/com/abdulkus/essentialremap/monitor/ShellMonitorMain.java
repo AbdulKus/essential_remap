@@ -301,13 +301,14 @@ public final class ShellMonitorMain {
             });
         }
         void handleForceStopForeground(String line) {
-            String[] parts = line.split(" ", 2);
-            if (parts.length != 2 || !parts[1].matches("[0-9a-f]{12}")) return;
+            String[] parts = line.split(" ", 3);
+            if (parts.length < 2 || !parts[1].matches("[0-9a-f]{12}")) return;
             String requestId = parts[1];
+            String packageHint = parts.length >= 3 && validPackageName(parts[2]) ? parts[2] : null;
             thread("essential-force-stop", () -> {
                 String resultLine;
                 try {
-                    String packageName = findForegroundPackage();
+                    String packageName = findForegroundPackage(packageHint);
                     if (packageName == null || packageName.isEmpty()) {
                         throw new IllegalStateException("foreground-app-not-found");
                     }
@@ -342,18 +343,36 @@ public final class ShellMonitorMain {
         }
     }
 
-    private static String findForegroundPackage() throws Exception {
-        String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
-        Pattern resumed = Pattern.compile(
-            "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/(?:[^\\s}]+)");
-        Matcher activity = resumed.matcher(activities);
-        if (activity.find()) return activity.group(1);
+    private static String findForegroundPackage(String packageHint) throws Exception {
+        try {
+            String top = command(1_500, "/system/bin/dumpsys", "activity", "top");
+            Matcher activityLine = Pattern.compile("(?m)^\\s*ACTIVITY\\s+([A-Za-z0-9._]+)/").matcher(top);
+            if (activityLine.find()) return activityLine.group(1);
+        } catch (Exception ignored) { }
 
-        String windows = command(1_500, "/system/bin/dumpsys", "window", "windows");
-        Pattern focused = Pattern.compile(
-            "mCurrentFocus[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/(?:[^\\s}]+)");
-        Matcher window = focused.matcher(windows);
-        return window.find() ? window.group(1) : null;
+        try {
+            String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
+            Pattern resumed = Pattern.compile(
+                "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/");
+            Matcher activity = resumed.matcher(activities);
+            if (activity.find()) return activity.group(1);
+        } catch (Exception ignored) { }
+
+        if (validPackageName(packageHint)) return packageHint;
+
+        try {
+            String windows = command(1_500, "/system/bin/dumpsys", "window", "displays");
+            Pattern focused = Pattern.compile(
+                "mCurrentFocus[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/");
+            Matcher window = focused.matcher(windows);
+            if (window.find()) return window.group(1);
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    private static boolean validPackageName(String packageName) {
+        return packageName != null &&
+            packageName.matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+");
     }
 
     private static boolean isProtectedPackage(String packageName) {

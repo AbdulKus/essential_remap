@@ -39,6 +39,7 @@ class ActionExecutor(
         action: ConfiguredAction,
         performGlobalAction: (Int) -> Boolean,
         performNavigationHandleLongPress: () -> Boolean,
+        foregroundPackageName: String? = null,
     ): ActionExecutionResult = when (action) {
         ConfiguredAction.None -> ActionExecutionResult(true, "No action configured")
         is ConfiguredAction.Http -> withContext(Dispatchers.IO) {
@@ -88,7 +89,7 @@ class ActionExecutor(
         ConfiguredAction.ForceStopForegroundApp -> withContext(Dispatchers.IO) {
             val bridge = shellBridge
                 ?: return@withContext ActionExecutionResult(false, "Shell monitor is unavailable")
-            bridge.forceStopForegroundApp().fold(
+            bridge.forceStopForegroundApp(foregroundPackageName).fold(
                 onSuccess = { ActionExecutionResult(true, "Foreground app stopped") },
                 onFailure = { error ->
                     ActionExecutionResult(false, error.message ?: "Could not stop the foreground app")
