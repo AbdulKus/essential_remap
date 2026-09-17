@@ -64,6 +64,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1497,6 +1498,7 @@ private fun HomeScreen(
             chooseHttp = { actionGesture = null; httpGesture = gesture },
             chooseSound = { actionGesture = null; soundGesture = gesture },
             soundModeAllowed = state.notificationPolicyAccess,
+            monitorReady = monitorReady,
             requestSoundModeAccess = {
                 actionGesture = null
                 openNotificationPolicySettings()
@@ -1673,6 +1675,7 @@ private fun HapticCard(
 private data class ActionOption(
     val title: String,
     val subtitle: String? = null,
+    val enabled: Boolean = true,
     val run: () -> Unit,
 )
 
@@ -1687,6 +1690,7 @@ private fun ActionChooserDialog(
     chooseHttp: () -> Unit,
     chooseSound: () -> Unit,
     soundModeAllowed: Boolean,
+    monitorReady: Boolean,
     requestSoundModeAccess: () -> Unit,
     chooseKind: (ActionKind) -> Unit,
     chooseSystem: (SystemAction) -> Unit,
@@ -1694,9 +1698,15 @@ private fun ActionChooserDialog(
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
         ActionOption(language.t("Launch Activity", "Запуск Activity"), run = chooseActivity),
-        ActionOption(language.t("Force stop app", "Завершить приложение")) {
-            chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP)
-        },
+        ActionOption(
+            title = language.t("Force stop app", "Завершить приложение"),
+            subtitle = language.t(
+                "Requires the running sleep monitor",
+                "Требуется запущенный монитор сна",
+            ),
+            enabled = monitorReady,
+            run = { chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP) },
+        ),
         ActionOption(
             language.t("Quick Settings tile", "Плитка Quick Settings"),
             language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
@@ -1736,7 +1746,11 @@ private fun ActionChooserDialog(
                 LazyColumn(contentPadding = PaddingValues(bottom = 14.dp)) {
                     items(options) { option ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { option.run() }.padding(horizontal = 20.dp, vertical = 13.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (option.enabled) 1f else 0.38f)
+                                .clickable(enabled = option.enabled) { option.run() }
+                                .padding(horizontal = 20.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
