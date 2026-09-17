@@ -15,6 +15,7 @@ import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.widget.Toast
 import com.abdulkus.essentialremap.data.SettingsRepository
 import com.abdulkus.essentialremap.domain.ActionFeedbackPolicy
 import com.abdulkus.essentialremap.domain.AppSettings
@@ -63,6 +64,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private var shellWakeLock: PowerManager.WakeLock? = null
     private val sourceGestureListener: (MonitorMessage, Boolean) -> Unit = ::handleSourceGesture
     @Volatile private var currentSettings = AppSettings()
+    @Volatile private var lastForegroundPackage: String? = null
 
     override fun onServiceConnected() {
         val container = (application as EssentialKeyApplication).container
@@ -153,7 +155,15 @@ class KeyAccessibilityService : AccessibilityService() {
         return true
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val packageName = event?.packageName?.toString()?.trim().orEmpty()
+        if (packageName.isBlank()) return
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            -> lastForegroundPackage = packageName
+        }
+    }
 
     override fun onInterrupt() {
         trace("accessibility service interrupted")
@@ -229,12 +239,14 @@ class KeyAccessibilityService : AccessibilityService() {
         }
         trace("action dispatch: press=$action configured=${config.safeName()}")
         hapticEngine.perform(currentSettings.hapticStrength)
+        val foregroundPackage = lastForegroundPackage
         serviceScope.launch {
             try {
                 val result = actionExecutor.execute(
                     action = config,
                     performGlobalAction = ::performGlobalAction,
                     performNavigationHandleLongPress = ::performNavigationHandleLongPress,
+                    foregroundPackageName = foregroundPackage,
                 )
                 trace(
                     "action result: press=$action configured=${config.safeName()} " +
@@ -242,6 +254,11 @@ class KeyAccessibilityService : AccessibilityService() {
                 )
                 val prefix = if (result.successful) "Done" else "Error"
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
+                if (!result.successful && config == ConfiguredAction.ForceStopForegroundApp) {
+                    withContext(Dispatchers.Main.immediate) {
+                        Toast.makeText(this@KeyAccessibilityService, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 trace(
