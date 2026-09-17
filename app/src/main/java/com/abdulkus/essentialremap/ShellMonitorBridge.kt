@@ -13,6 +13,8 @@ import android.os.SystemClock
 import com.abdulkus.essentialremap.monitor.MonitorMessage
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
 import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.ui.AppLanguage
+import com.abdulkus.essentialremap.ui.translate
 import java.io.PrintWriter
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +56,10 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     private var activeSession: String? = null
     private val handoff = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "com.abdulkus.essentialremap:input-handoff")
         .apply { setReferenceCounted(false) }
+
+    private companion object {
+        val PACKAGE_NAME_PATTERN = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
+    }
 
     /** Called exclusively after the manifest DUMP permission and sender checks in the receiver. */
     fun configure(port: Int, secret: String) {
@@ -178,24 +184,53 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         }
     }
 
-    suspend fun forceStopForegroundApp(): Result<Unit> {
+    suspend fun forceStopForegroundApp(foregroundPackageName: String?): Result<Unit> {
         if (!preferences.screenOffEnabled) {
             return Result.failure(
-                IllegalStateException("Enable the shell monitor in Settings to use Force stop app"),
+                IllegalStateException(localized(
+                    "Enable the sleep monitor in Essential Remap settings first",
+                    "Сначала включите монитор сна в настройках Essential Remap",
+                )),
             )
         }
         if (!ScreenOffKeyAccess.isGranted(appContext)) {
-            return Result.failure(IllegalStateException("Shell monitor is not running"))
+            val message = if (ScreenOffKeyAccess.wasConfigured(appContext)) {
+                localized(
+                    "Restart the sleep monitor in Essential Remap settings after the app update",
+                    "Перезапустите монитор сна в настройках Essential Remap после обновления приложения",
+                )
+            } else {
+                localized(
+                    "Start the sleep monitor in Essential Remap settings first",
+                    "Сначала запустите монитор сна в настройках Essential Remap",
+                )
+            }
+            return Result.failure(IllegalStateException(message))
         }
-        val activeWriter = writer
-            ?: return Result.failure(IllegalStateException("Shell monitor is disconnected"))
+        var activeWriter = writer
+        if (activeWriter == null) {
+            requestConnect()
+            val connected = withTimeoutOrNull(1_500L) {
+                while (writer == null) delay(50L)
+                writer
+            }
+            activeWriter = connected
+        }
+        val commandWriter = activeWriter
+            ?: return Result.failure(IllegalStateException(localized(
+                "Sleep monitor is disconnected. Restart it in Essential Remap settings",
+                "Монитор сна отключён. Перезапустите его в настройках Essential Remap",
+            )))
         val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
         val reply = CompletableDeferred<Result<Unit>>()
         commandReplies[requestId] = reply
         return try {
-            val sent = synchronized(activeWriter) {
-                activeWriter.println("FORCE_STOP_FOREGROUND $requestId")
-                !activeWriter.checkError()
+            val safePackage = foregroundPackageName
+                ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
+                ?: "-"
+            val sent = synchronized(commandWriter) {
+                commandWriter.println("FORCE_STOP_FOREGROUND $requestId $safePackage")
+                !commandWriter.checkError()
             }
             if (!sent) {
                 Result.failure(IllegalStateException("Could not send force-stop command"))
@@ -207,6 +242,9 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
             commandReplies.remove(requestId)
         }
     }
+
+    private fun localized(en: String, ru: String): String =
+        (preferences.language ?: AppLanguage.ENGLISH).translate(en, ru)
 
     private fun receiveCommandReply(line: String) {
         val parts = line.split(' ', limit = 4)
