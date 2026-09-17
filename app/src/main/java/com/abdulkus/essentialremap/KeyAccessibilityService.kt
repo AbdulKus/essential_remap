@@ -10,7 +10,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import com.abdulkus.essentialremap.monitor.MonitorMessage
+import com.abdulkus.essentialremap.ui.AppLanguage
 import com.abdulkus.essentialremap.ui.UserPreferences
+import com.abdulkus.essentialremap.ui.translate
 import android.view.KeyEvent
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -240,6 +242,7 @@ class KeyAccessibilityService : AccessibilityService() {
         trace("action dispatch: press=$action configured=${config.safeName()}")
         hapticEngine.perform(currentSettings.hapticStrength)
         val foregroundPackage = lastForegroundPackage
+        val foregroundLabel = foregroundPackage?.let(::resolveApplicationLabel)
         serviceScope.launch {
             try {
                 val result = actionExecutor.execute(
@@ -254,9 +257,18 @@ class KeyAccessibilityService : AccessibilityService() {
                 )
                 val prefix = if (result.successful) "Done" else "Error"
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
-                if (!result.successful && config == ConfiguredAction.ForceStopForegroundApp) {
+                if (config == ConfiguredAction.ForceStopForegroundApp) {
                     withContext(Dispatchers.Main.immediate) {
-                        Toast.makeText(this@KeyAccessibilityService, result.message, Toast.LENGTH_LONG).show()
+                        val message = if (result.successful) {
+                            val language = UserPreferences(this@KeyAccessibilityService).language
+                                ?: AppLanguage.ENGLISH
+                            val target = foregroundLabel ?: foregroundPackage
+                                ?: language.translate("application", "приложение")
+                            "${language.translate("Stopped", "Завершено")} «$target»"
+                        } else {
+                            result.message
+                        }
+                        Toast.makeText(this@KeyAccessibilityService, message, Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (error: Throwable) {
@@ -441,6 +453,11 @@ class KeyAccessibilityService : AccessibilityService() {
                 .onSuccess { trace("temporary action wake lock released") }
         }
     }
+
+    private fun resolveApplicationLabel(packageName: String): String = runCatching {
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        packageManager.getApplicationLabel(info).toString().ifBlank { packageName }
+    }.getOrDefault(packageName)
 
     private fun trace(message: String) {
         if (::diagnostics.isInitialized) diagnostics.log("Runtime: $message")
