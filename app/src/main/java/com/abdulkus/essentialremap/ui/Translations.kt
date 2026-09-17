@@ -106,6 +106,7 @@ private val translations = mapOf(
     "Press and hold" to a("Drücken und halten", "Maintenir appuyé", "Naciśnij i przytrzymaj", "Натиснути й утримувати", "Tekan dan tahan", "按住", "押し続ける", "누르고 있기"),
     "Voice assistant" to a("Sprachassistent", "Assistant vocal", "Asystent głosowy", "Голосовий помічник", "Asisten suara", "语音助手", "音声アシスタント", "음성 어시스턴트"),
     "Flashlight" to a("Taschenlampe", "Lampe torche", "Latarka", "Ліхтарик", "Senter", "手电筒", "ライト", "손전등"),
+    "Force stop app" to a("App zwangsweise beenden", "Forcer l’arrêt de l’application", "Wymuś zatrzymanie aplikacji", "Примусово зупинити застосунок", "Paksa berhenti aplikasi", "强制停止应用", "アプリを強制終了", "앱 강제 종료"),
     "6-digit pairing code" to a("6-stelliger Kopplungscode", "Code d’association à 6 chiffres", "6-cyfrowy kod parowania", "6-значний код сполучення", "Kode penyandingan 6 digit", "6 位配对码", "6桁のペアリングコード", "6자리 페어링 코드"),
     "SUBMIT CODE" to a("CODE BESTÄTIGEN", "VALIDER LE CODE", "ZATWIERDŹ KOD", "ПІДТВЕРДИТИ КОД", "KIRIM KODE", "提交代码", "コードを送信", "코드 제출"),
     "Cancel" to a("Abbrechen", "Annuler", "Anuluj", "Скасувати", "Batal", "取消", "キャンセル", "취소"),
