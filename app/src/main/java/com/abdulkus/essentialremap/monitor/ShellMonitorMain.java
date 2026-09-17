@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 12;
+    public static final int STATE_REVISION = 13;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -252,6 +252,8 @@ public final class ShellMonitorMain {
                         emit(inputReady && process != null && process.isAlive() ? "READY" : "RESET", 0, 0);
                     } else if (line.startsWith("CLICK_TILE ")) {
                         handleTileClick(line);
+                    } else if (line.startsWith("FORCE_STOP_FOREGROUND ")) {
+                        handleForceStopForeground(line);
                     }
                 }
             } catch (Exception ignored) { } finally { close(); }
@@ -298,6 +300,34 @@ public final class ShellMonitorMain {
                 sendControl(resultLine);
             });
         }
+        void handleForceStopForeground(String line) {
+            String[] parts = line.split(" ", 2);
+            if (parts.length != 2 || !parts[1].matches("[0-9a-f]{12}")) return;
+            String requestId = parts[1];
+            thread("essential-force-stop", () -> {
+                String resultLine;
+                try {
+                    String packageName = findForegroundPackage();
+                    if (packageName == null || packageName.isEmpty()) {
+                        throw new IllegalStateException("foreground-app-not-found");
+                    }
+                    if (isProtectedPackage(packageName)) {
+                        throw new IllegalStateException("protected-app:" + packageName);
+                    }
+                    command(2_000, "/system/bin/am", "force-stop", "--user", "0", packageName);
+                    resultLine = "FORCE_STOP_RESULT " + requestId + " OK";
+                    log("force stop package=" + packageName + " result=ok");
+                } catch (Exception error) {
+                    String detail = error.getMessage();
+                    if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
+                    detail = detail.replace('\n', ' ').replace('\r', ' ');
+                    resultLine = "FORCE_STOP_RESULT " + requestId + " ERR " + detail;
+                    log("force stop result=error " + detail);
+                }
+                sendControl(resultLine);
+            });
+        }
+
         synchronized void sendControl(String line) {
             if (closed) return;
             writer.println(line);
@@ -310,6 +340,38 @@ public final class ShellMonitorMain {
             if (connection == this) connection = null;
             notifyAll();
         }
+    }
+
+    private static String findForegroundPackage() throws Exception {
+        String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
+        Pattern resumed = Pattern.compile(
+            "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/(?:[^\\s}]+)");
+        Matcher activity = resumed.matcher(activities);
+        if (activity.find()) return activity.group(1);
+
+        String windows = command(1_500, "/system/bin/dumpsys", "window", "windows");
+        Pattern focused = Pattern.compile(
+            "mCurrentFocus[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/(?:[^\\s}]+)");
+        Matcher window = focused.matcher(windows);
+        return window.find() ? window.group(1) : null;
+    }
+
+    private static boolean isProtectedPackage(String packageName) {
+        if (PACKAGE.equals(packageName) || "android".equals(packageName) ||
+            "com.android.systemui".equals(packageName)) {
+            return true;
+        }
+        try {
+            String home = command(1_500, "/system/bin/cmd", "package", "resolve-activity",
+                "--brief", "--user", "0", "-a", "android.intent.action.MAIN",
+                "-c", "android.intent.category.HOME");
+            for (String line : home.split("\\n")) {
+                String value = line.trim();
+                int slash = value.indexOf('/');
+                if (slash > 0 && packageName.equals(value.substring(0, slash))) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
     }
 
     private static String command(long timeoutMs, String... args) throws Exception {
