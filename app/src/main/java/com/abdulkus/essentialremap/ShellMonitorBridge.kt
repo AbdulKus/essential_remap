@@ -105,7 +105,8 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                         channel.input.use { input ->
                             while (true) {
                                 val line = MonitorTransport.readLine(input) ?: break
-                                if (line.startsWith("TILE_RESULT ")) {
+                                if (line.startsWith("TILE_RESULT ") ||
+                                    line.startsWith("FORCE_STOP_RESULT ")) {
                                     receiveCommandReply(line)
                                     continue
                                 }
@@ -177,6 +178,36 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         }
     }
 
+    suspend fun forceStopForegroundApp(): Result<Unit> {
+        if (!preferences.screenOffEnabled) {
+            return Result.failure(
+                IllegalStateException("Enable the shell monitor in Settings to use Force stop app"),
+            )
+        }
+        if (!ScreenOffKeyAccess.isGranted(appContext)) {
+            return Result.failure(IllegalStateException("Shell monitor is not running"))
+        }
+        val activeWriter = writer
+            ?: return Result.failure(IllegalStateException("Shell monitor is disconnected"))
+        val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
+        val reply = CompletableDeferred<Result<Unit>>()
+        commandReplies[requestId] = reply
+        return try {
+            val sent = synchronized(activeWriter) {
+                activeWriter.println("FORCE_STOP_FOREGROUND $requestId")
+                !activeWriter.checkError()
+            }
+            if (!sent) {
+                Result.failure(IllegalStateException("Could not send force-stop command"))
+            } else {
+                withTimeoutOrNull(4_000L) { reply.await() }
+                    ?: Result.failure(IllegalStateException("Shell monitor did not answer the force-stop command"))
+            }
+        } finally {
+            commandReplies.remove(requestId)
+        }
+    }
+
     private fun receiveCommandReply(line: String) {
         val parts = line.split(' ', limit = 4)
         if (parts.size < 3) return
@@ -185,7 +216,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         if (parts[2] == "OK") {
             pending.complete(Result.success(Unit))
         } else {
-            val detail = parts.getOrNull(3).orEmpty().ifBlank { "Quick Settings tile command failed" }
+            val detail = parts.getOrNull(3).orEmpty().ifBlank { "Shell command failed" }
             pending.complete(Result.failure(IllegalStateException(detail)))
         }
     }
