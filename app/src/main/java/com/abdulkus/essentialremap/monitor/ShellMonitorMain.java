@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 13;
+    public static final int STATE_REVISION = 14;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -38,6 +38,7 @@ public final class ShellMonitorMain {
     private volatile boolean inputReady;
     private long messageNumber;
     private volatile long lastPhysicalElapsed;
+    private volatile String homePackage;
 
     private ShellMonitorMain(int appUid, File directory) {
         this.directory = directory;
@@ -63,6 +64,8 @@ public final class ShellMonitorMain {
 
     private void run() throws Exception {
         directory.mkdirs();
+        homePackage = resolveHomePackage();
+        log("home package=" + (homePackage == null ? "unknown" : homePackage));
         // Binding the abstract socket is also an atomic, kernel-owned single-instance lock.
         LocalServerSocket instanceLock = new LocalServerSocket(MonitorMessage.SOCKET);
         try (ServerSocket server = new ServerSocket(0, 4, InetAddress.getByName(MonitorTransport.HOST))) {
@@ -344,6 +347,8 @@ public final class ShellMonitorMain {
     }
 
     private static String findForegroundPackage(String packageHint) throws Exception {
+        if (validPackageName(packageHint)) return packageHint;
+
         try {
             String top = command(1_500, "/system/bin/dumpsys", "activity", "top");
             Matcher activityLine = Pattern.compile("(?m)^\\s*ACTIVITY\\s+([A-Za-z0-9._]+)/").matcher(top);
@@ -357,8 +362,6 @@ public final class ShellMonitorMain {
             Matcher activity = resumed.matcher(activities);
             if (activity.find()) return activity.group(1);
         } catch (Exception ignored) { }
-
-        if (validPackageName(packageHint)) return packageHint;
 
         try {
             String windows = command(1_500, "/system/bin/dumpsys", "window", "displays");
@@ -375,11 +378,14 @@ public final class ShellMonitorMain {
             packageName.matches("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+");
     }
 
-    private static boolean isProtectedPackage(String packageName) {
-        if (PACKAGE.equals(packageName) || "android".equals(packageName) ||
-            "com.android.systemui".equals(packageName)) {
-            return true;
-        }
+    private boolean isProtectedPackage(String packageName) {
+        return PACKAGE.equals(packageName) ||
+            "android".equals(packageName) ||
+            "com.android.systemui".equals(packageName) ||
+            packageName.equals(homePackage);
+    }
+
+    private static String resolveHomePackage() {
         try {
             String home = command(1_500, "/system/bin/cmd", "package", "resolve-activity",
                 "--brief", "--user", "0", "-a", "android.intent.action.MAIN",
@@ -387,10 +393,10 @@ public final class ShellMonitorMain {
             for (String line : home.split("\\n")) {
                 String value = line.trim();
                 int slash = value.indexOf('/');
-                if (slash > 0 && packageName.equals(value.substring(0, slash))) return true;
+                if (slash > 0) return value.substring(0, slash);
             }
         } catch (Exception ignored) { }
-        return false;
+        return null;
     }
 
     private static String command(long timeoutMs, String... args) throws Exception {

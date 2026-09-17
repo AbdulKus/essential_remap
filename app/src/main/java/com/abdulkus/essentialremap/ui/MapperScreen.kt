@@ -64,6 +64,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1497,6 +1498,7 @@ private fun HomeScreen(
             chooseHttp = { actionGesture = null; httpGesture = gesture },
             chooseSound = { actionGesture = null; soundGesture = gesture },
             soundModeAllowed = state.notificationPolicyAccess,
+            monitorReady = monitorReady,
             requestSoundModeAccess = {
                 actionGesture = null
                 openNotificationPolicySettings()
@@ -1673,6 +1675,7 @@ private fun HapticCard(
 private data class ActionOption(
     val title: String,
     val subtitle: String? = null,
+    val enabled: Boolean = true,
     val run: () -> Unit,
 )
 
@@ -1687,6 +1690,7 @@ private fun ActionChooserDialog(
     chooseHttp: () -> Unit,
     chooseSound: () -> Unit,
     soundModeAllowed: Boolean,
+    monitorReady: Boolean,
     requestSoundModeAccess: () -> Unit,
     chooseKind: (ActionKind) -> Unit,
     chooseSystem: (SystemAction) -> Unit,
@@ -1694,13 +1698,19 @@ private fun ActionChooserDialog(
     val options = listOf(
         ActionOption(language.t("Launch an app", "Запустить приложение"), run = chooseApp),
         ActionOption(language.t("Launch Activity", "Запуск Activity"), run = chooseActivity),
-        ActionOption(language.t("Force stop app", "Завершить приложение")) {
-            chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP)
-        },
         ActionOption(
-            language.t("Quick Settings tile", "Плитка Quick Settings"),
-            language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
-            chooseQuickSettingsTile,
+            title = language.t("Force stop app", "Завершить приложение"),
+            subtitle = language.t(
+                "Requires the running sleep monitor",
+                "Требуется запущенный монитор сна",
+            ),
+            enabled = monitorReady,
+            run = { chooseKind(ActionKind.FORCE_STOP_FOREGROUND_APP) },
+        ),
+        ActionOption(
+            title = language.t("Quick Settings tile", "Плитка Quick Settings"),
+            subtitle = language.t("Requires the running sleep monitor", "Требуется запущенный монитор сна"),
+            run = chooseQuickSettingsTile,
         ),
         ActionOption("Circle to Search", language.t("Google + Hold handle to search", "Google + удержание полоски для поиска")) { chooseSystem(SystemAction.CIRCLE_TO_SEARCH) },
         ActionOption(language.t("Voice assistant", "Голосовой помощник")) { chooseSystem(SystemAction.ASSISTANT) },
@@ -1726,7 +1736,11 @@ private fun ActionChooserDialog(
         ActionOption(language.t("Home", "Домой")) { chooseSystem(SystemAction.HOME) },
         ActionOption(language.t("Recent apps", "Недавние приложения")) { chooseSystem(SystemAction.RECENTS) },
         ActionOption(language.t("Open link / deep link", "Открыть ссылку / deep link"), run = chooseUrl),
-        ActionOption(language.t("HTTP request", "HTTP-запрос"), language.t("For Tasker, Home Assistant and webhooks", "Для Tasker, Home Assistant и вебхуков"), chooseHttp),
+        ActionOption(
+            title = language.t("HTTP request", "HTTP-запрос"),
+            subtitle = language.t("For Tasker, Home Assistant and webhooks", "Для Tasker, Home Assistant и вебхуков"),
+            run = chooseHttp,
+        ),
         ActionOption(language.t("No action", "Ничего")) { chooseKind(ActionKind.NONE) },
     )
     Dialog(onDismissRequest = dismiss) {
@@ -1736,7 +1750,11 @@ private fun ActionChooserDialog(
                 LazyColumn(contentPadding = PaddingValues(bottom = 14.dp)) {
                     items(options) { option ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { option.run() }.padding(horizontal = 20.dp, vertical = 13.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (option.enabled) 1f else 0.38f)
+                                .clickable(enabled = option.enabled) { option.run() }
+                                .padding(horizontal = 20.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
