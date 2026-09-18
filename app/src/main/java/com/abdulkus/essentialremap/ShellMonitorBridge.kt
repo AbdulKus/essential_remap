@@ -45,6 +45,10 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connecting = AtomicBoolean(false)
     private val commandReplies = ConcurrentHashMap<String, CompletableDeferred<Result<Unit>>>()
+    private val forceStopReplies = ConcurrentHashMap<String, CompletableDeferred<Result<String>>>()
+    private data class ForegroundTarget(val packageName: String, val userId: Int, val capturedElapsed: Long)
+    @Volatile private var prefetchedForeground: ForegroundTarget? = null
+    @Volatile private var foregroundRequestId: String? = null
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var lastReadyElapsed = 0L
@@ -59,6 +63,8 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
 
     private companion object {
         val PACKAGE_NAME_PATTERN = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
+        const val UNKNOWN_USER_ID = -1
+        const val FOREGROUND_PREFETCH_MAX_AGE_MS = 2_500L
     }
 
     /** Called exclusively after the manifest DUMP permission and sender checks in the receiver. */
@@ -111,10 +117,19 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                         channel.input.use { input ->
                             while (true) {
                                 val line = MonitorTransport.readLine(input) ?: break
-                                if (line.startsWith("TILE_RESULT ") ||
-                                    line.startsWith("FORCE_STOP_RESULT ")) {
-                                    receiveCommandReply(line)
-                                    continue
+                                when {
+                                    line.startsWith("TILE_RESULT ") -> {
+                                        receiveCommandReply(line)
+                                        continue
+                                    }
+                                    line.startsWith("FORCE_STOP_RESULT ") -> {
+                                        receiveForceStopReply(line)
+                                        continue
+                                    }
+                                    line.startsWith("FOREGROUND_RESULT ") -> {
+                                        receiveForegroundReply(line)
+                                        continue
+                                    }
                                 }
                                 val message = MonitorMessage.parse(line)
                                 if (message.kind == "READY" &&
@@ -139,6 +154,9 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                             socket = null
                             writer = null
                             failCommandReplies("Sleep monitor disconnected")
+                            failForceStopReplies("Sleep monitor disconnected")
+                            prefetchedForeground = null
+                            foregroundRequestId = null
                             ScreenOffKeyAccess.setRuntimeHealthy(false)
                             diagnostics.log("Bridge: disconnected " +
                                 com.abdulkus.essentialremap.setup.AdbLifetimeState.read(appContext))
@@ -184,7 +202,24 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         }
     }
 
-    suspend fun forceStopForegroundApp(foregroundPackageName: String?): Result<Unit> {
+    fun prefetchForegroundApp(fallbackPackageName: String?) {
+        if (!preferences.screenOffEnabled || !ScreenOffKeyAccess.isGranted(appContext)) return
+        val activeWriter = writer ?: return
+        val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
+        val safeFallback = fallbackPackageName
+            ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
+            ?: "-"
+        foregroundRequestId = requestId
+        prefetchedForeground = null
+        synchronized(activeWriter) {
+            activeWriter.println("GET_FOREGROUND $requestId $safeFallback")
+            if (activeWriter.checkError()) {
+                foregroundRequestId = null
+            }
+        }
+    }
+
+    suspend fun forceStopForegroundApp(foregroundPackageName: String?): Result<String> {
         if (!preferences.screenOffEnabled) {
             return Result.failure(
                 IllegalStateException(localized(
@@ -222,14 +257,19 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                 "Монитор сна отключён. Перезапустите его в настройках Essential Remap",
             )))
         val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
-        val reply = CompletableDeferred<Result<Unit>>()
-        commandReplies[requestId] = reply
+        val reply = CompletableDeferred<Result<String>>()
+        forceStopReplies[requestId] = reply
+        val prefetched = prefetchedForeground
+            ?.takeIf { SystemClock.elapsedRealtime() - it.capturedElapsed <= FOREGROUND_PREFETCH_MAX_AGE_MS }
+        prefetchedForeground = null
+        foregroundRequestId = null
         return try {
-            val safePackage = foregroundPackageName
-                ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
+            val safePackage = prefetched?.packageName
+                ?: foregroundPackageName?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
                 ?: "-"
+            val userId = prefetched?.userId ?: UNKNOWN_USER_ID
             val sent = synchronized(commandWriter) {
-                commandWriter.println("FORCE_STOP_FOREGROUND $requestId $safePackage")
+                commandWriter.println("FORCE_STOP_FOREGROUND $requestId $userId $safePackage")
                 !commandWriter.checkError()
             }
             if (!sent) {
@@ -239,7 +279,7 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
                     ?: Result.failure(IllegalStateException("Shell monitor did not answer the force-stop command"))
             }
         } finally {
-            commandReplies.remove(requestId)
+            forceStopReplies.remove(requestId)
         }
     }
 
@@ -259,9 +299,49 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
         }
     }
 
+    private fun receiveForegroundReply(line: String) {
+        val parts = line.split(' ', limit = 6)
+        if (parts.size < 3) return
+        val requestId = parts[1]
+        if (foregroundRequestId != requestId) return
+        foregroundRequestId = null
+        if (parts[2] != "OK" || parts.size < 5) return
+        val userId = parts[3].toIntOrNull() ?: UNKNOWN_USER_ID
+        val packageName = parts[4]
+        if (!packageName.matches(PACKAGE_NAME_PATTERN)) return
+        prefetchedForeground = ForegroundTarget(
+            packageName = packageName,
+            userId = userId,
+            capturedElapsed = SystemClock.elapsedRealtime(),
+        )
+        diagnostics.log("Bridge: prefetched foreground package=$packageName user=$userId")
+    }
+
+    private fun receiveForceStopReply(line: String) {
+        val parts = line.split(' ', limit = 5)
+        if (parts.size < 3) return
+        val requestId = parts[1]
+        val pending = forceStopReplies.remove(requestId) ?: return
+        if (parts[2] == "OK") {
+            val packageName = parts.getOrNull(3)
+                ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
+                ?: "application"
+            pending.complete(Result.success(packageName))
+        } else {
+            val detail = parts.getOrNull(3).orEmpty().ifBlank { "Shell command failed" }
+            pending.complete(Result.failure(IllegalStateException(detail)))
+        }
+    }
+
     private fun failCommandReplies(message: String) {
         val pending = commandReplies.values.toList()
         commandReplies.clear()
+        pending.forEach { it.complete(Result.failure(IllegalStateException(message))) }
+    }
+
+    private fun failForceStopReplies(message: String) {
+        val pending = forceStopReplies.values.toList()
+        forceStopReplies.clear()
         pending.forEach { it.complete(Result.failure(IllegalStateException(message))) }
     }
 
