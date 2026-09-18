@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 14;
+    public static final int STATE_REVISION = 15;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -255,6 +255,8 @@ public final class ShellMonitorMain {
                         emit(inputReady && process != null && process.isAlive() ? "READY" : "RESET", 0, 0);
                     } else if (line.startsWith("CLICK_TILE ")) {
                         handleTileClick(line);
+                    } else if (line.startsWith("GET_FOREGROUND ")) {
+                        handleForegroundQuery(line);
                     } else if (line.startsWith("FORCE_STOP_FOREGROUND ")) {
                         handleForceStopForeground(line);
                     }
@@ -303,24 +305,52 @@ public final class ShellMonitorMain {
                 sendControl(resultLine);
             });
         }
-        void handleForceStopForeground(String line) {
+        void handleForegroundQuery(String line) {
             String[] parts = line.split(" ", 3);
             if (parts.length < 2 || !parts[1].matches("[0-9a-f]{12}")) return;
             String requestId = parts[1];
-            String packageHint = parts.length >= 3 && validPackageName(parts[2]) ? parts[2] : null;
+            String fallback = parts.length >= 3 && validPackageName(parts[2]) ? parts[2] : null;
+            thread("essential-foreground", () -> {
+                try {
+                    ForegroundTarget target = findForegroundTarget(fallback);
+                    if (target == null) {
+                        sendControl("FOREGROUND_RESULT " + requestId + " ERR not-found");
+                        return;
+                    }
+                    sendControl("FOREGROUND_RESULT " + requestId + " OK " +
+                        target.userId + " " + target.packageName);
+                    log("foreground package=" + target.packageName + " user=" + target.userId);
+                } catch (Exception error) {
+                    String detail = error.getMessage();
+                    if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
+                    detail = detail.replace('\n', ' ').replace('\r', ' ');
+                    sendControl("FOREGROUND_RESULT " + requestId + " ERR " + detail);
+                    log("foreground result=error " + detail);
+                }
+            });
+        }
+
+        void handleForceStopForeground(String line) {
+            String[] parts = line.split(" ", 4);
+            if (parts.length < 3 || !parts[1].matches("[0-9a-f]{12}")) return;
+            String requestId = parts[1];
+            int requestedUser = parseUserId(parts[2]);
+            String packageHint = parts.length >= 4 && validPackageName(parts[3]) ? parts[3] : null;
             thread("essential-force-stop", () -> {
                 String resultLine;
                 try {
-                    String packageName = findForegroundPackage(packageHint);
-                    if (packageName == null || packageName.isEmpty()) {
+                    ForegroundTarget target = packageHint == null
+                        ? findForegroundTarget(null)
+                        : new ForegroundTarget(packageHint, requestedUser);
+                    if (target == null || !validPackageName(target.packageName)) {
                         throw new IllegalStateException("foreground-app-not-found");
                     }
-                    if (isProtectedPackage(packageName)) {
-                        throw new IllegalStateException("protected-app:" + packageName);
+                    if (isProtectedPackage(target.packageName)) {
+                        throw new IllegalStateException("protected-app:" + target.packageName);
                     }
-                    command(2_000, "/system/bin/am", "force-stop", "--user", "0", packageName);
-                    resultLine = "FORCE_STOP_RESULT " + requestId + " OK";
-                    log("force stop package=" + packageName + " result=ok");
+                    forceStopPackage(target);
+                    resultLine = "FORCE_STOP_RESULT " + requestId + " OK " + target.packageName;
+                    log("force stop package=" + target.packageName + " user=" + target.userId + " result=ok");
                 } catch (Exception error) {
                     String detail = error.getMessage();
                     if (detail == null || detail.isEmpty()) detail = error.getClass().getSimpleName();
@@ -346,31 +376,63 @@ public final class ShellMonitorMain {
         }
     }
 
-    private static String findForegroundPackage(String packageHint) throws Exception {
-        if (validPackageName(packageHint)) return packageHint;
+    private static final class ForegroundTarget {
+        final String packageName;
+        final int userId;
+        ForegroundTarget(String packageName, int userId) {
+            this.packageName = packageName;
+            this.userId = userId;
+        }
+    }
+
+    private static ForegroundTarget findForegroundTarget(String fallbackPackage) throws Exception {
+        try {
+            String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
+            Pattern resumed = Pattern.compile(
+                "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu(\\d+)\\s+([A-Za-z0-9._]+)/");
+            Matcher activity = resumed.matcher(activities);
+            if (activity.find()) {
+                return new ForegroundTarget(activity.group(2), Integer.parseInt(activity.group(1)));
+            }
+        } catch (Exception ignored) { }
 
         try {
             String top = command(1_500, "/system/bin/dumpsys", "activity", "top");
             Matcher activityLine = Pattern.compile("(?m)^\\s*ACTIVITY\\s+([A-Za-z0-9._]+)/").matcher(top);
-            if (activityLine.find()) return activityLine.group(1);
-        } catch (Exception ignored) { }
-
-        try {
-            String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
-            Pattern resumed = Pattern.compile(
-                "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/");
-            Matcher activity = resumed.matcher(activities);
-            if (activity.find()) return activity.group(1);
+            if (activityLine.find()) return new ForegroundTarget(activityLine.group(1), -1);
         } catch (Exception ignored) { }
 
         try {
             String windows = command(1_500, "/system/bin/dumpsys", "window", "displays");
             Pattern focused = Pattern.compile(
-                "mCurrentFocus[^\\n]*?\\bu\\d+\\s+([A-Za-z0-9._]+)/");
+                "mCurrentFocus[^\\n]*?\\bu(\\d+)\\s+([A-Za-z0-9._]+)/");
             Matcher window = focused.matcher(windows);
-            if (window.find()) return window.group(1);
+            if (window.find()) {
+                return new ForegroundTarget(window.group(2), Integer.parseInt(window.group(1)));
+            }
         } catch (Exception ignored) { }
-        return null;
+
+        return validPackageName(fallbackPackage)
+            ? new ForegroundTarget(fallbackPackage, -1)
+            : null;
+    }
+
+    private static int parseUserId(String value) {
+        try { return Integer.parseInt(value); }
+        catch (Exception ignored) { return -1; }
+    }
+
+    private static void forceStopPackage(ForegroundTarget target) throws Exception {
+        if (target.userId >= 0) {
+            command(2_000, "/system/bin/am", "force-stop", "--user",
+                Integer.toString(target.userId), target.packageName);
+            return;
+        }
+        try {
+            command(2_000, "/system/bin/am", "force-stop", "--user", "all", target.packageName);
+        } catch (Exception unsupportedAllUsers) {
+            command(2_000, "/system/bin/am", "force-stop", "--user", "0", target.packageName);
+        }
     }
 
     private static boolean validPackageName(String packageName) {
