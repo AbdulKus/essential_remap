@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /** app_process entry point, running as shell or root. No Context, external network, alarms, or idle wake lock. */
 public final class ShellMonitorMain {
     private static final String PACKAGE = "com.abdulkus.essentialremap";
-    public static final int STATE_REVISION = 15;
+    public static final int STATE_REVISION = 16;
     private static final Pattern INPUT = Pattern.compile(
         "\\[\\s*(\\d+)\\.(\\d{6})\\]\\s+(?:/dev/input/[^:]+:\\s+)?([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{4})\\s+([0-9a-fA-F]{8})");
     private final String session = UUID.randomUUID().toString().replace("-", "");
@@ -38,6 +38,8 @@ public final class ShellMonitorMain {
     private volatile boolean inputReady;
     private long messageNumber;
     private volatile long lastPhysicalElapsed;
+    private volatile ForegroundTarget lastPhysicalForegroundTarget;
+    private volatile long lastPhysicalForegroundElapsed;
     private volatile String homePackage;
 
     private ShellMonitorMain(int appUid, File directory) {
@@ -138,8 +140,12 @@ public final class ShellMonitorMain {
                         lastPhysicalElapsed = SystemClock.elapsedRealtime();
                         failures = 0;
                         long value = Long.parseLong(event.group(5), 16);
-                        if (value == 1) classifier.down(ns);
-                        else if (value == 0) classifier.up(ns);
+                        if (value == 1) {
+                            captureForegroundAtPhysicalDown();
+                            classifier.down(ns);
+                        } else if (value == 0) {
+                            classifier.up(ns);
+                        }
                         // EV_KEY repeat is intentionally ignored.
                     }
                 }
@@ -339,9 +345,13 @@ public final class ShellMonitorMain {
             thread("essential-force-stop", () -> {
                 String resultLine;
                 try {
-                    ForegroundTarget target = packageHint == null
-                        ? findForegroundTarget(null)
-                        : new ForegroundTarget(packageHint, requestedUser);
+                    ForegroundTarget target = recentPhysicalForegroundTarget();
+                    if (target == null && packageHint != null) {
+                        target = new ForegroundTarget(packageHint, requestedUser);
+                    }
+                    if (target == null) {
+                        target = findForegroundTarget(null);
+                    }
                     if (target == null || !validPackageName(target.packageName)) {
                         throw new IllegalStateException("foreground-app-not-found");
                     }
@@ -376,6 +386,43 @@ public final class ShellMonitorMain {
         }
     }
 
+    private void captureForegroundAtPhysicalDown() {
+        lastPhysicalForegroundTarget = null;
+        lastPhysicalForegroundElapsed = SystemClock.elapsedRealtime();
+        try {
+            ForegroundTarget target = findResumedActivityTarget();
+            if (target != null && !isProtectedPackage(target.packageName)) {
+                lastPhysicalForegroundTarget = target;
+                log("physical foreground package=" + target.packageName + " user=" + target.userId);
+            } else if (target != null) {
+                log("physical foreground ignored protected=" + target.packageName);
+            } else {
+                log("physical foreground unresolved");
+            }
+        } catch (Exception error) {
+            log("physical foreground capture failed " + error.getClass().getSimpleName() + ": " + error.getMessage());
+        }
+    }
+
+    private ForegroundTarget recentPhysicalForegroundTarget() {
+        ForegroundTarget target = lastPhysicalForegroundTarget;
+        long age = SystemClock.elapsedRealtime() - lastPhysicalForegroundElapsed;
+        if (target == null || age < 0 || age > PHYSICAL_TARGET_MAX_AGE_MS) return null;
+        if (isProtectedPackage(target.packageName)) return null;
+        return target;
+    }
+
+    private static ForegroundTarget findResumedActivityTarget() throws Exception {
+        String activities = command(900, "/system/bin/dumpsys", "activity", "activities");
+        Pattern resumed = Pattern.compile(
+            "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu(\\d+)\\s+([A-Za-z0-9._]+)/");
+        Matcher activity = resumed.matcher(activities);
+        if (activity.find()) {
+            return new ForegroundTarget(activity.group(2), Integer.parseInt(activity.group(1)));
+        }
+        return null;
+    }
+
     private static final class ForegroundTarget {
         final String packageName;
         final int userId;
@@ -387,13 +434,8 @@ public final class ShellMonitorMain {
 
     private static ForegroundTarget findForegroundTarget(String fallbackPackage) throws Exception {
         try {
-            String activities = command(1_500, "/system/bin/dumpsys", "activity", "activities");
-            Pattern resumed = Pattern.compile(
-                "(?:topResumedActivity|mResumedActivity)[^\\n]*?\\bu(\\d+)\\s+([A-Za-z0-9._]+)/");
-            Matcher activity = resumed.matcher(activities);
-            if (activity.find()) {
-                return new ForegroundTarget(activity.group(2), Integer.parseInt(activity.group(1)));
-            }
+            ForegroundTarget resumed = findResumedActivityTarget();
+            if (resumed != null) return resumed;
         } catch (Exception ignored) { }
 
         try {
@@ -434,6 +476,8 @@ public final class ShellMonitorMain {
             command(2_000, "/system/bin/am", "force-stop", "--user", "0", target.packageName);
         }
     }
+
+    private static final long PHYSICAL_TARGET_MAX_AGE_MS = 3_500L;
 
     private static boolean validPackageName(String packageName) {
         return packageName != null &&
