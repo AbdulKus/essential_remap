@@ -85,7 +85,8 @@ class KeyAccessibilityService : AccessibilityService() {
         actionExecutor = ActionExecutor(this, container.torchController)
         keyguardManager = getSystemService(KeyguardManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
-        createForceStopFeedbackChannel()
+        runCatching { createForceStopFeedbackChannel() }
+            .onFailure { diagnostics.log("Runtime: feedback channel init failed: ${it.message}") }
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
@@ -375,8 +376,20 @@ class KeyAccessibilityService : AccessibilityService() {
             gestureSequenceActive = true
             gestureFirstDownNs = downTimeNanos
             gestureTargetPackage = lastForegroundPackage
-            if (!startedScreenOff && ::shellBridge.isInitialized) {
-                shellBridge.prefetchForegroundApp(gestureTargetPackage)
+            if (!startedScreenOff &&
+                ::shellBridge.isInitialized &&
+                currentSettings.actions.values.any { it == ConfiguredAction.ForceStopForegroundApp }
+            ) {
+                val targetSnapshot = gestureTargetPackage
+                serviceScope.launch(Dispatchers.IO) {
+                    runCatching { shellBridge.prefetchForegroundApp(targetSnapshot) }
+                        .onFailure { error ->
+                            diagnostics.log(
+                                "Runtime: foreground prefetch failed " +
+                                    "${error::class.java.simpleName}: ${error.message}",
+                            )
+                        }
+                }
             }
         }
         if (gateResult == PhysicalKeyEventGate.DownResult.NEW) gestureLastDownNs = downTimeNanos

@@ -203,19 +203,27 @@ class ShellMonitorBridge(context: Context, private val diagnostics: SetupDiagnos
     }
 
     fun prefetchForegroundApp(fallbackPackageName: String?) {
-        if (!preferences.screenOffEnabled || !ScreenOffKeyAccess.isGranted(appContext)) return
-        val activeWriter = writer ?: return
-        val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
-        val safeFallback = fallbackPackageName
-            ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
-            ?: "-"
-        foregroundRequestId = requestId
-        prefetchedForeground = null
-        synchronized(activeWriter) {
-            activeWriter.println("GET_FOREGROUND $requestId $safeFallback")
-            if (activeWriter.checkError()) {
-                foregroundRequestId = null
+        try {
+            if (!preferences.screenOffEnabled || !ScreenOffKeyAccess.isGranted(appContext)) return
+            val activeWriter = writer ?: return
+            val requestId = UUID.randomUUID().toString().replace("-", "").take(12)
+            val safeFallback = fallbackPackageName
+                ?.takeIf { it.matches(PACKAGE_NAME_PATTERN) }
+                ?: "-"
+            foregroundRequestId = requestId
+            prefetchedForeground = null
+            synchronized(activeWriter) {
+                activeWriter.println("GET_FOREGROUND $requestId $safeFallback")
+                if (activeWriter.checkError()) {
+                    foregroundRequestId = null
+                }
             }
+        } catch (error: Throwable) {
+            foregroundRequestId = null
+            diagnostics.log(
+                "Bridge: foreground prefetch ignored " +
+                    "${error::class.java.simpleName}: ${error.message}",
+            )
         }
     }
 
