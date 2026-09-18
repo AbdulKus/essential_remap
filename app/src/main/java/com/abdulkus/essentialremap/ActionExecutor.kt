@@ -90,7 +90,7 @@ class ActionExecutor(
             val bridge = shellBridge
                 ?: return@withContext ActionExecutionResult(false, "Shell monitor is unavailable")
             bridge.forceStopForegroundApp(foregroundPackageName).fold(
-                onSuccess = { ActionExecutionResult(true, "Foreground app stopped") },
+                onSuccess = { stoppedPackage -> ActionExecutionResult(true, stoppedPackage) },
                 onFailure = { error ->
                     ActionExecutionResult(false, error.message ?: "Could not stop the foreground app")
                 },

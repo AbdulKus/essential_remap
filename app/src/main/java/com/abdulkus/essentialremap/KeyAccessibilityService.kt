@@ -1,9 +1,13 @@
 package com.abdulkus.essentialremap
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.pm.PackageManager
 import android.graphics.Path
 import android.os.Build
 import android.os.Handler
@@ -26,6 +30,8 @@ import com.abdulkus.essentialremap.domain.LockScreenExecutionPolicy
 import com.abdulkus.essentialremap.domain.PressAction
 import com.abdulkus.essentialremap.haptics.HapticEngine
 import com.abdulkus.essentialremap.setup.SetupDiagnostics
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +56,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private val actionGate = GestureActionGate()
     private var gestureStartedWhileLocked = false
     private var gestureStartedScreenOff = false
+    private var gestureTargetPackage: String? = null
     private var activeWakeLock: PowerManager.WakeLock? = null
     private var settingsLoaded = false
     private var shellListenerAttached = false
@@ -67,6 +74,7 @@ class KeyAccessibilityService : AccessibilityService() {
     private val sourceGestureListener: (MonitorMessage, Boolean) -> Unit = ::handleSourceGesture
     @Volatile private var currentSettings = AppSettings()
     @Volatile private var lastForegroundPackage: String? = null
+    private var feedbackNotificationSequence = 0
 
     override fun onServiceConnected() {
         val container = (application as EssentialKeyApplication).container
@@ -77,6 +85,7 @@ class KeyAccessibilityService : AccessibilityService() {
         actionExecutor = ActionExecutor(this, container.torchController)
         keyguardManager = getSystemService(KeyguardManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
+        createForceStopFeedbackChannel()
         serviceInfo = serviceInfo.apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         }
@@ -189,11 +198,13 @@ class KeyAccessibilityService : AccessibilityService() {
     private fun executeAction(action: PressAction) {
         val startedWhileLocked = gestureStartedWhileLocked
         val startedScreenOff = gestureStartedScreenOff
+        val targetPackage = gestureTargetPackage
         val wakeLock = activeWakeLock
         val mayDispatch = actionGate.claim(gestureFirstDownNs, gestureLastDownNs)
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
         gestureStartedScreenOff = false
+        gestureTargetPackage = null
         activeWakeLock = null
 
         if (!mayDispatch) {
@@ -201,7 +212,7 @@ class KeyAccessibilityService : AccessibilityService() {
             trace("duplicate physical gesture discarded after transport handover")
             return
         }
-        dispatchAction(action, startedWhileLocked, startedScreenOff, wakeLock)
+        dispatchAction(action, startedWhileLocked, startedScreenOff, wakeLock, targetPackage)
     }
 
     private fun dispatchAction(
@@ -209,6 +220,7 @@ class KeyAccessibilityService : AccessibilityService() {
         startedWhileLocked: Boolean,
         startedScreenOff: Boolean,
         wakeLock: PowerManager.WakeLock?,
+        targetPackage: String?,
     ) {
         trace(
             "gesture classified: press=$action startedScreenOff=$startedScreenOff " +
@@ -241,8 +253,7 @@ class KeyAccessibilityService : AccessibilityService() {
         }
         trace("action dispatch: press=$action configured=${config.safeName()}")
         hapticEngine.perform(currentSettings.hapticStrength)
-        val foregroundPackage = lastForegroundPackage
-        val foregroundLabel = foregroundPackage?.let(::resolveApplicationLabel)
+        val foregroundPackage = targetPackage ?: lastForegroundPackage
         serviceScope.launch {
             try {
                 val result = actionExecutor.execute(
@@ -259,16 +270,18 @@ class KeyAccessibilityService : AccessibilityService() {
                 repository.saveResult(action, "${Instant.now()} — $prefix: ${result.message}")
                 if (config == ConfiguredAction.ForceStopForegroundApp) {
                     withContext(Dispatchers.Main.immediate) {
+                        val language = UserPreferences(this@KeyAccessibilityService).language
+                            ?: AppLanguage.ENGLISH
                         val message = if (result.successful) {
-                            val language = UserPreferences(this@KeyAccessibilityService).language
-                                ?: AppLanguage.ENGLISH
-                            val target = foregroundLabel ?: foregroundPackage
+                            val actualPackage = result.message.takeIf { it.contains('.') }
+                                ?: foregroundPackage
+                            val target = actualPackage?.let(::resolveApplicationLabel)
                                 ?: language.translate("application", "приложение")
                             "${language.translate("Stopped", "Завершено")} «$target»"
                         } else {
                             result.message
                         }
-                        Toast.makeText(this@KeyAccessibilityService, message, Toast.LENGTH_SHORT).show()
+                        showForceStopFeedback(message, result.successful)
                     }
                 }
             } catch (error: Throwable) {
@@ -327,7 +340,7 @@ class KeyAccessibilityService : AccessibilityService() {
             return
         }
         trace("source gesture: press=$action physicalDown=${message.downNs} physicalEvent=${message.eventNs}")
-        dispatchAction(action, shellStartedLocked, true, lock)
+        dispatchAction(action, shellStartedLocked, true, lock, lastForegroundPackage)
     }
 
     private fun finishShellSequence() {
@@ -361,6 +374,10 @@ class KeyAccessibilityService : AccessibilityService() {
         if (!gestureSequenceActive) {
             gestureSequenceActive = true
             gestureFirstDownNs = downTimeNanos
+            gestureTargetPackage = lastForegroundPackage
+            if (!startedScreenOff && ::shellBridge.isInitialized) {
+                shellBridge.prefetchForegroundApp(gestureTargetPackage)
+            }
         }
         if (gateResult == PhysicalKeyEventGate.DownResult.NEW) gestureLastDownNs = downTimeNanos
         gestureStartedScreenOff = gestureStartedScreenOff || startedScreenOff
@@ -442,6 +459,7 @@ class KeyAccessibilityService : AccessibilityService() {
         gestureSequenceActive = false
         gestureStartedWhileLocked = false
         gestureStartedScreenOff = false
+        gestureTargetPackage = null
         physicalKeyEventGate.reset()
         releaseWakeLock(activeWakeLock)
         activeWakeLock = null
@@ -458,6 +476,51 @@ class KeyAccessibilityService : AccessibilityService() {
         val info = packageManager.getApplicationInfo(packageName, 0)
         packageManager.getApplicationLabel(info).toString().ifBlank { packageName }
     }.getOrDefault(packageName)
+
+    private fun createForceStopFeedbackChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val language = UserPreferences(this).language ?: AppLanguage.ENGLISH
+        val channel = NotificationChannel(
+            FORCE_STOP_FEEDBACK_CHANNEL_ID,
+            language.translate("Action results", "Результаты действий"),
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = language.translate(
+                "Short confirmations for button actions",
+                "Краткие подтверждения действий кнопки",
+            )
+            setSound(null, null)
+            enableVibration(false)
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    private fun showForceStopFeedback(message: String, successful: Boolean) {
+        val notifications = NotificationManagerCompat.from(this)
+        val permissionMissing =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (permissionMissing || !notifications.areNotificationsEnabled()) {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        feedbackNotificationSequence = (feedbackNotificationSequence + 1) % 1000
+        val id = FORCE_STOP_FEEDBACK_NOTIFICATION_BASE + feedbackNotificationSequence
+        val notification = NotificationCompat.Builder(this, FORCE_STOP_FEEDBACK_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(if (successful) "Essential Remap" else "Essential Remap — Error")
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setTimeoutAfter(FORCE_STOP_FEEDBACK_TIMEOUT_MS)
+            .setOnlyAlertOnce(false)
+            .build()
+        runCatching { notifications.notify(id, notification) }
+            .onFailure { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }
+    }
 
     private fun trace(message: String) {
         if (::diagnostics.isInitialized) diagnostics.log("Runtime: $message")
@@ -529,6 +592,9 @@ class KeyAccessibilityService : AccessibilityService() {
         const val WAKE_LOCK_TIMEOUT_MS = 5_000L
         const val WAKE_LOCK_TAG = "com.abdulkus.essentialremap:button-action"
         const val NANOS_PER_MILLISECOND = 1_000_000L
+        const val FORCE_STOP_FEEDBACK_CHANNEL_ID = "force_stop_action_feedback_v1"
+        const val FORCE_STOP_FEEDBACK_NOTIFICATION_BASE = 4_200
+        const val FORCE_STOP_FEEDBACK_TIMEOUT_MS = 2_500L
     }
 
     private class HandlerScheduler(private val handler: Handler) : GestureClassifier.Scheduler {
