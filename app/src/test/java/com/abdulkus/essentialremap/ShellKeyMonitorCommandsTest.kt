@@ -70,4 +70,67 @@ class ShellKeyMonitorCommandsTest {
             assertEquals(listOf("-TERM 300", "-TERM 200", "-TERM 100"), trace.readLines())
         } finally { directory.deleteRecursively() }
     }
+
+    @Test
+    fun stoppingBeforeMonitorInstallationIsAnIdempotentSuccess() {
+        val directory = Files.createTempDirectory("monitor-not-installed").toFile()
+        try {
+            val pid = directory.resolve("key-monitor.pid").apply { writeText("123") }
+            val state = directory.resolve("key-monitor.state").apply { writeText("old revision") }
+
+            repeat(2) {
+                val (exit, output) = runHostStop(directory)
+                assertEquals(output, 0, exit)
+                assertTrue(output, output.contains(ShellKeyMonitorCommands.STOP_OK))
+                assertFalse(pid.exists())
+                assertFalse(state.exists())
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun stoppingAnInstalledMonitorStillInvokesItsScript() {
+        val directory = Files.createTempDirectory("monitor-installed").toFile()
+        try {
+            directory.resolve("key-monitor.sh").writeText(
+                "#!/bin/sh\n" +
+                    "test \"\$1\" = stop || exit 8\n" +
+                    "echo essential-remap:shell-monitor-stopped\n",
+            )
+            val (exit, output) = runHostStop(directory)
+            assertEquals(output, 0, exit)
+            assertEquals(ShellKeyMonitorCommands.STOP_OK, output.trim())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun anInstalledButBrokenMonitorDoesNotReportSuccessfulCleanup() {
+        val directory = Files.createTempDirectory("monitor-broken").toFile()
+        try {
+            directory.resolve("key-monitor.sh").writeText("#!/bin/sh\necho stop-failed\nexit 2\n")
+            val (exit, output) = runHostStop(directory)
+            assertEquals(2, exit)
+            assertFalse(output.contains(ShellKeyMonitorCommands.STOP_OK))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun runHostStop(directory: java.io.File): Pair<Int, String> {
+        val command = ShellKeyMonitorCommands.stop
+            .replace("/data/local/tmp/essential_remap", directory.absolutePath)
+            .replace("/system/bin/sh", "/bin/sh")
+            .replace("/system/bin/pidof", "/bin/false") // Simulate no orphaned helper.
+            .replace("/system/bin/sleep", "/bin/sleep")
+            .replace("/system/bin/kill", "/bin/kill")
+            .replace("/system/bin/rm", "/bin/rm")
+        val process = ProcessBuilder("/bin/sh", "-c", command).redirectErrorStream(true).start()
+        val output = process.inputStream.bufferedReader().readText()
+        return process.waitFor() to output
+    }
+
 }
