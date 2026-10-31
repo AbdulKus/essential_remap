@@ -253,7 +253,28 @@ object ShellKeyMonitorCommands {
     val handoffFilesToShell: String =
         "/system/bin/chown -R 2000:2000 $DIRECTORY && /system/bin/chmod 700 $DIRECTORY"
 
-    const val stop = "/system/bin/sh $SCRIPT stop"
+    // Restoring the Nothing packages must also work when the screen-off monitor was
+    // never installed (or its script was deleted). Stop the normal script when present;
+    // otherwise stop only an orphaned helper with our unique process name.
+    val stop: String = buildString {
+        append("if [ -f $SCRIPT ]; then /system/bin/sh $SCRIPT stop; else ")
+        append("monitor_pids=\"\$(/system/bin/pidof essential-remap-monitor 2>/dev/null)\"; ")
+        append("for monitor_pid in \$monitor_pids; do ")
+        append("case \"\$monitor_pid\" in ''|*[!0-9]*) continue ;; esac; ")
+        append("/system/bin/kill -TERM \"\$monitor_pid\" 2>/dev/null || true; ")
+        append("done; ")
+        append("attempt=0; ")
+        append("while [ \"\$attempt\" -lt 30 ] && ")
+        append("[ -n \"\$(/system/bin/pidof essential-remap-monitor 2>/dev/null)\" ]; do ")
+        append("/system/bin/sleep 0.1; attempt=\$((attempt + 1)); ")
+        append("done; ")
+        append("if [ -n \"\$(/system/bin/pidof essential-remap-monitor 2>/dev/null)\" ]; then ")
+        append("echo essential-remap:shell-monitor-cleanup-failed; exit 1; ")
+        append("fi; ")
+        append("/system/bin/rm -f $PID_FILE $STATE_FILE; ")
+        append("echo '$STOP_OK (not installed)'; ")
+        append("fi")
+    }
     const val status = "/system/bin/sh $SCRIPT status"
 
     fun manualAdbCommands(includeSleepMonitor: Boolean = true): String = buildList {
